@@ -33,6 +33,7 @@ export function Agent1({ sim, clock, events }: Props) {
   // 멈춘 뒤에는 마지막 출력의 24시간 정답 확인 구간까지 보여 줌
   const end = stopped && shown.length ? (isAfter(clock, addHours(shown.at(-1)!.time, 24)) ? addHours(shown.at(-1)!.time, 24) : clock) : clock
   const alarm = !!point && !unknown && point.p >= a1.threshold
+  const model = sim.run?.meta.agent1_internal
 
   return (
     <div className="ad">
@@ -84,18 +85,24 @@ export function Agent1({ sim, clock, events }: Props) {
 
       {point && (
         <section className="sub-card">
-          <h4>{unknown ? '마지막 출력의 입력' : '이 시각의 입력'} <span className="h4-sub">{mdhm(point.time)} · 위험에 많이 기여한 순</span></h4>
-          <FactorList factors={point.factors} up="위험 높임" down="영향 적음" />
+          <h4>
+            {unknown ? '마지막 출력의 요인' : '이 시각의 요인'}
+            <span className="h4-sub">
+              {mdhm(point.time)} · {point.base !== undefined ? `설명 기준값 ${pct(point.base)} 에서 변수 묶음마다 올리고 내린 양 (그룹 Shapley)` : '위험에 많이 기여한 순'}
+            </span>
+          </h4>
+          <FactorList factors={point.factors} up="위험 높임" down="위험 낮춤" />
         </section>
       )}
       <p className="note">
-        정상 구간 (ALT, ALP, 총빌리를 모두 최근 24시간 안에 쟀고 모두 2 x ULN 미만) 에서만 예측하고, 아니면 판정 불가로 둡니다. 첫 이상 (2배) 전까지만 돌고, 목표는 24시간 안 5 x ULN 사건입니다. 기준 시각까지 공개된 기록만 씁니다.
+        {model && <>MIMIC-IV 로 학습한 그래디언트 부스팅 (변수 88개{model.auroc ? `, 내부 검증 AUROC ${model.auroc.toFixed(2)}, AUPRC ${model.auprc.toFixed(2)}` : ''}). </>}
+        정상 구간 (ALT, ALP, 총빌리를 모두 최근 24시간 안에 쟀고 모두 2 x ULN 미만) 에서만 예측하고, 아니면 판정 불가로 둡니다. 첫 이상 (2배) 전까지만 돌고, 목표는 24시간 안 5 x ULN 사건입니다. 경보 기준 {pct(a1.threshold)} 는 화면 설정입니다.
       </p>
     </div>
   )
 }
 
-const PAD_L = 34
+const PAD_L = 38
 const PAD_R = 12
 const TOP = 10
 const PH = 92
@@ -124,7 +131,11 @@ function RiskChart({ points, gaps, threshold, start, end, events, firstAlarm, ve
   const x0 = toMs(start)
   const x1 = toMs(xEnd)
   const sx = (t: string) => PAD_L + ((toMs(t) - x0) / (x1 - x0)) * (W - PAD_L - PAD_R)
-  const sy = (p: number) => TOP + PH - p * PH
+  // 확률이 작으면 축을 자료에 맞춤. 경보 기준이 축 밖이면 표시만 함
+  const top = Math.max(0.02, ...points.map(p => p.p * 1.25))
+  const yMax = [0.02, 0.05, 0.1, 0.2, 0.5, 1].find(v => top <= v) ?? 1
+  const sy = (p: number) => TOP + PH - (Math.min(p, yMax) / yMax) * PH
+  const thrIn = threshold <= yMax
   // 한 시간보다 벌어지면 선을 끊음
   const path = points
     .map((p, i) => `${i && toMs(p.time) - toMs(points[i - 1].time) <= HOUR ? 'L' : 'M'}${sx(p.time)},${sy(p.p)}`)
@@ -167,10 +178,10 @@ function RiskChart({ points, gaps, threshold, start, end, events, firstAlarm, ve
             <text x={vx + 4} y={TOP + PH - 4} className="mc-verify-label">정답 확인 24시간</text>
           </g>
         )}
-        {[0, 0.5, 1].map(v => (
+        {[0, yMax / 2, yMax].map(v => (
           <g key={v}>
             <line x1={PAD_L} x2={W - PAD_R} y1={sy(v)} y2={sy(v)} className={v === 0 ? 'mc-base' : 'mc-grid'} />
-            <text x={PAD_L - 5} y={sy(v) + 3.5} textAnchor="end" className="mc-tick">{v * 100}%</text>
+            <text x={PAD_L - 5} y={sy(v) + 3.5} textAnchor="end" className="mc-tick">{+(v * 100).toFixed(1)}%</text>
           </g>
         ))}
         {midnights.map(d => (
@@ -184,8 +195,14 @@ function RiskChart({ points, gaps, threshold, start, end, events, firstAlarm, ve
             <title>{`${mdhm(t)} 판정 불가`}</title>
           </rect>
         ))}
-        <line x1={PAD_L} x2={W - PAD_R} y1={sy(threshold)} y2={sy(threshold)} className="mc-thr" />
-        <text x={PAD_L + 4} y={sy(threshold) - 3} className="mc-thr-label">경보 {threshold * 100}%</text>
+        {thrIn ? (
+          <>
+            <line x1={PAD_L} x2={W - PAD_R} y1={sy(threshold)} y2={sy(threshold)} className="mc-thr" />
+            <text x={PAD_L + 4} y={sy(threshold) - 3} className="mc-thr-label">경보 {threshold * 100}%</text>
+          </>
+        ) : (
+          <text x={PAD_L + 4} y={TOP + 9} className="mc-thr-label">↑ 경보 기준 {threshold * 100}% 는 축 위</text>
+        )}
         {evs.map(e => (
           <g key={e.k} className="mc-ev">
             <line x1={sx(e.t0)} x2={sx(e.t0)} y1={TOP} y2={TOP + PH} />

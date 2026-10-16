@@ -1,21 +1,21 @@
-// 사례 1 의 에이전트 3 (원인 추정) 실행 기록 (손으로 쓴 예시). MIMIC 연구원의 원인 규칙과 코드를 받으면 같은 형식의 실행 결과로 바꾼다.
-// 명세서 정의: 첫 이상 (2배) 시점에 한 번, 범주 10개마다 규칙 점수를 내고 1.0 이상이면 해당 (여러 범주 가능). 담낭염은 판단 불가.
-import type { AgentRun, AgentStep, CauseCall, GuideLine, SuspectDrug } from '../types'
+// 사례 1 의 에이전트 3 (원인 추정) 실행 기록. 모델 패키지의 원인 규칙 (rule_agent.py, 학습 없음) 을 첫 이상 시점의
+// 48시간 스냅숏에 적용한 출력 (model-bridge → model/c01.json) 을 화면 형식으로 바꾸고, 범주마다 근거 위키의 지침 근거를 붙인다.
+// 점수와 근거는 규칙 모델 출력 그대로이고, 여기서 바꾸지 않는다.
+import type { AgentRun, AgentStep, CauseCall, Evidence, GuideLine, SuspectDrug } from '../types'
 import { case01 } from './case01'
 import { CAUSE_WIKI, causeName, EVIDENCE_MAP } from './causes'
-import { firstEvent, K_FIRST, reported, RULE_THRESHOLD, sameDraw, rRatio, patternOf, uln, itemOf } from '../lib/events'
+import { CAUSE_NO, evidenceOf, model1Of, modelRun } from './modelrun'
+import { firstEvent, K_FIRST, RULE_THRESHOLD, reported, sameDraw, rRatio, uln } from '../lib/events'
 import { fmtNum } from '../lib/lab'
 import { hm, hoursBetween, isAfter, mdhm } from '../lib/time'
 
-// 첫 이상: t0 는 공개 시각, 에이전트는 t0 뒤 첫 정시에 돈다. 입력은 t0 까지 공개된 기록만
+const run = modelRun(case01.id)!
+const a3 = run.a3!
 const ev = firstEvent(case01, K_FIRST)!
+if (run.first_event?.t0 !== ev.t0) throw new Error(`모델 출력의 첫 이상 (${run.first_event?.t0}) 과 화면 정의 (${ev.t0}) 가 다릅니다. npm run models 로 다시 만드세요`)
 const { t0, drawn } = ev
-const runAt = ev.detectAt
 
 const before = (t: string) => !isAfter(t, t0)
-const between = (t: string) => isAfter(t, t0) && !isAfter(t, runAt)
-const admins = case01.mar.flatMap(o => o.admins)
-const vitals = case01.vitals.filter(v => before(v.time))
 const order = (id: string) => case01.mar.find(o => o.id === id)!
 const lab = (code: string) => sameDraw(case01, ev, code)!
 const x = (code: string, v: number) => (v / uln(case01, code)).toFixed(1)
@@ -23,36 +23,18 @@ const lag = (from: string) => {
   const h = hoursBetween(from, drawn)
   return h >= 24 ? `${(h / 24).toFixed(1)}일` : `${h.toFixed(1)}시간`
 }
-
-const nLab = case01.labs.filter(r => reported(r, t0)).length
-const nLabCut = case01.labs.filter(r => !reported(r, t0) && reported(r, runAt)).length
-const nAdmin = admins.filter(a => before(a.time)).length
-const nAdminCut = admins.filter(a => between(a.time)).length
-const nVitalCut = case01.vitals.filter(v => between(v.time)).length
-const micro = case01.micro.filter(m => before(m.collected))
-const nPending = micro.filter(m => isAfter(m.reported, t0)).length
-const nDrug = case01.mar.filter(o => o.admins.some(a => a.status === 'given' && before(a.time))).length
-
-const hypo = vitals.filter(v => v.map < 65)
-const mapMin = Math.min(...hypo.map(v => v.map))
+const vitals = case01.vitals.filter(v => before(v.time) && !isAfter(addH(t0, -48), v.time))
+function addH(t: string, h: number) {
+  const d = new Date(Date.parse(t.replace(' ', 'T') + ':00Z') + h * 3_600_000)
+  return d.toISOString().slice(0, 16).replace('T', ' ')
+}
+const mapMin = Math.min(...vitals.map(v => v.map))
 const neMax = Math.max(...order('NE').admins.filter(a => before(a.time)).map(a => a.rate ?? 0))
-const lacs = case01.labs.filter(r => r.code === 'LAC' && reported(r, t0))
-const lacMax = lacs.reduce((a, b) => (b.value > a.value ? b : a))
-const spo2Min = vitals.reduce((a, b) => (b.spo2 < a.spo2 ? b : a))
-const hrMax = vitals.reduce((a, b) => (b.hr > a.hr ? b : a))
-const cvpMax = Math.max(...vitals.map(v => v.cvp ?? 0))
-
+const lacMax = case01.labs.filter(r => r.code === 'LAC' && reported(r, t0)).reduce((a, b) => (b.value > a.value ? b : a))
 const alt = lab('ALT')
 const ast = lab('AST')
-const alp = lab('ALP')
-const tb = lab('TB')
-const db = lab('DB')
-const ldh = lab('LDH')
-const ck = lab('CK')
-const hb = lab('HB')
 const R = rRatio(case01, ev)!
-const hbPrev = case01.labs.filter(r => r.code === 'HB' && r.charttime < drawn).at(-1)!
-
+const amino = Math.max(alt.value / uln(case01, 'ALT'), ast.value / uln(case01, 'AST'))
 
 // 근거 위키 (wiki_kb) 의 '원인 10개 근거 지도' 에서 범주마다 옮긴 지침 근거와 근거 공백. 문장과 인용은 위키 그대로
 const g = (cause: number, text: string, cite: string): GuideLine => ({ text, cite, page: EVIDENCE_MAP, heading: CAUSE_WIKI[cause].section })
@@ -101,106 +83,46 @@ const GUIDE: Record<number, GuideLine[]> = {
   ],
 }
 
-const calls: CauseCall[] = ([
-  {
-    cause: 1, score: 2.8,
-    temporal: `저혈압 시작 (${mdhm(hypo[0].time)}) 이 사건 채혈 (${hm(drawn)}) 보다 ${hoursBetween(hypo[0].time, drawn).toFixed(1)}시간 앞섬`,
-    support: [
-      { text: `MAP 65 미만 ${hypo.length}시간, 최저 ${mapMin}`, time: `${mdhm(hypo[0].time)}~${hm(hypo.at(-1)!.time).slice(0, 2)}:59`, ref: { tab: 'vital', row: 'map', from: hypo[0].time, to: hypo.at(-1)!.time } },
-      { text: `노르에피네프린 시작, 최대 ${neMax} mcg/kg/min`, time: mdhm(order('NE').start), ref: { tab: 'mar', row: 'NE' } },
-      { text: '바소프레신 추가', time: mdhm(order('VP').start), ref: { tab: 'mar', row: 'VP' } },
-      { text: `젖산 최고 ${fmtNum(lacMax.value, 1)} mmol/L`, time: mdhm(lacMax.charttime), ref: { tab: 'lab', row: 'LAC', col: lacMax.id } },
-      { text: `SpO2 최저 ${spo2Min.spo2}%`, time: mdhm(spo2Min.time), ref: { tab: 'vital', row: 'spo2', from: spo2Min.time, to: spo2Min.time } },
-      { text: `AST ${ast.value} 가 ALT ${alt.value} 보다 높고 LDH ${fmtNum(ldh.value, 0)} (${x('LDH', ldh.value)}배) 로 함께 오름`, time: mdhm(drawn), ref: { tab: 'lab', row: 'AST', col: ast.id } },
-    ],
-    against: [
-      { text: `ALT ${x('ALT', alt.value)}배로 아직 크게 오르지 않음 (허혈성은 흔히 20배 이상)`, ref: { tab: 'lab', row: 'ALT', col: alt.id } },
-    ],
-    missing: [{ text: '심초음파 없음 → 심장 원인과 울혈이 함께 있는지 모름', ref: { tab: 'proc', row: 'miss-echo' } }],
-  },
-  {
-    cause: 2, score: 1.2,
-    support: [
-      { text: `신속 심방세동, 심박 최고 ${hrMax.hr}`, time: mdhm(hrMax.time), ref: { tab: 'vital', row: 'hr', from: '2026-03-10 16:00', to: '2026-03-10 18:00' } },
-      { text: `CVP ${cvpMax} mmHg 로 오름`, time: '03-10 19:00~21:00', ref: { tab: 'vital', row: 'cvp', from: '2026-03-10 19:00', to: '2026-03-10 21:00' } },
-    ],
-    against: [{ text: `총빌리 ${fmtNum(tb.value, 1)} 로 정상 범위`, ref: { tab: 'lab', row: 'TB', col: tb.id } }],
-    missing: [
-      { text: '심초음파 없음', ref: { tab: 'proc', row: 'miss-echo' } },
-      { text: 'BNP 측정 없음', ref: { tab: 'proc', row: 'miss-bnp' } },
-    ],
-  },
-  {
-    cause: 3, score: 0.4,
-    support: [{ text: '기관 흡인물 배양 S. pneumoniae (폐렴)', time: mdhm(case01.micro.find(m => m.id === 'M3')!.reported), ref: { tab: 'micro', row: 'M3' } }],
-    against: [{ text: `총빌리 ${fmtNum(tb.value, 1)}, 직접빌리 ${fmtNum(db.value, 1)} 로 실무 기준 (총빌리 >2 mg/dL) 아래`, ref: { tab: 'lab', row: 'TB', col: tb.id } }],
-    missing: [{ text: `${mdhm(case01.micro.find(m => m.id === 'M6')!.collected)} 혈액배양은 t0 에 배양 중`, ref: { tab: 'micro', row: 'M6' } }],
-  },
-  {
-    cause: 4, score: 0.6,
-    temporal: `아미오다론 시작이 사건 채혈보다 ${lag(order('AMIO').start)} 앞섬`,
-    support: [
-      { text: '아미오다론 정맥 부하 뒤 지속 주입', time: mdhm(order('AMIO').start), ref: { tab: 'mar', row: 'AMIO' } },
-      { text: `피페라실린/타조박탐 투여 ${lag(order('PIP').start)}째`, time: `${mdhm(order('PIP').start)}~`, ref: { tab: 'mar', row: 'PIP' } },
-    ],
-    against: [
-      { text: `ALT ${x('ALT', alt.value)}배로 생화학 기준 (AST/ALT >5×ULN) 에 못 미침`, ref: { tab: 'lab', row: 'ALT', col: alt.id } },
-      { text: '같은 시점의 쇼크로 충분히 설명됨' },
-      { text: '피페라실린/타조박탐은 대개 담즙정체형이라 패턴이 맞지 않음' },
-    ],
-    missing: [{ text: '약을 끊은 뒤 반응은 t0 뒤 정보라 판단에 쓰지 않음' }],
-  },
-  {
-    cause: 5, score: 0,
-    support: [],
-    against: [{ text: '투약기록에 정맥영양 없음' }],
-    missing: [],
-  },
-  {
-    cause: 6, score: 0.1,
-    support: [],
-    against: [{ text: `ALP ${alp.value} (${x('ALP', alp.value)}배), 직접빌리 ${fmtNum(db.value, 1)} 로 담즙정체 없음`, ref: { tab: 'lab', row: 'ALP', col: alp.id } }],
-    missing: [{ text: 't0 전 복부 영상 없음' }],
-  },
-  {
-    cause: 7, score: null,
-    support: [],
-    against: [],
-    missing: [{ text: '영상 판독문이 없어 규칙상 판단하지 않음', ref: { tab: 'proc', row: 'miss-read' } }],
-  },
-  {
-    cause: 8, score: 0.3,
-    support: [{ text: `LDH ${fmtNum(ldh.value, 0)} (${x('LDH', ldh.value)}배)`, time: mdhm(drawn), ref: { tab: 'lab', row: 'LDH', col: ldh.id } }],
-    against: [{ text: `Hb ${fmtNum(hbPrev.value, 1)} → ${fmtNum(hb.value, 1)} 로 거의 그대로, 총빌리 정상`, ref: { tab: 'lab', row: 'HB', col: hb.id } }],
-    missing: [{ text: 'haptoglobin, 말초혈액 도말 없음', ref: { tab: 'proc', row: 'miss-smear' } }],
-  },
-  {
-    cause: 9, score: 0,
-    support: [],
-    against: [],
-    missing: [{ text: '간염 바이러스 표지자 측정 없음', ref: { tab: 'proc', row: 'miss-virus' } }],
-  },
-  {
-    cause: 10, score: 0.2,
-    support: [],
-    against: [
-      { text: `CK ${ck.value} (${x('CK', ck.value)}배) 로 근육 기원 아님`, ref: { tab: 'lab', row: 'CK', col: ck.id } },
-      { text: '기저 간질환, 간이식, 알코올 기록 없음' },
-    ],
-    missing: [],
-  },
-] as Omit<CauseCall, 'guide'>[]).map(c => ({ ...c, guide: GUIDE[c.cause] }))
+/** 규칙이 그 범주를 보는 조건 (rule_agent.py 그대로 요약). 점수가 없을 때 왜 없는지 읽을 수 있게 */
+const RULE: Record<number, string> = {
+  1: 'AST·ALT 최고가 5×ULN 이상일 때만 셈: 배수 (10× 이상 1, 5× 이상 0.5) + MAP 65 미만 1 + 젖산 (4 이상 1, 2 이상 0.5) + 승압제 주입 1',
+  2: '간 검사 상승 (2× 이상) 과 함께 심부전 과거력 1.2 또는 NT-proBNP 가 나이별 기준 이상 1',
+  3: '담즙정체 패턴 (총빌리 2× 이상, 또는 ALP 2× 이상이고 R 2 이하) 일 때 0.5 + 전신 염증 (WBC, 발열) 각 0.5 + 혈소판 100 미만 0.5 + 승압제 0.5',
+  4: '48시간 안 간독성 목록의 약 투여 기록, 최근 두 가지까지 각 0.9',
+  5: '정맥영양 노출 일수 (7일 이상 1, 3일 이상 0.5) + 담즙정체·혼합 패턴 0.5',
+  6: 'TG18 의심 수준: 담즙정체 (총빌리 2 mg/dL 이상 또는 ALP·GGT·AST·ALT 1.5× 초과) 와 전신 염증이 함께 있으면 0.5씩',
+  7: '국소 소견과 영상이 필요해 구조화 자료로는 판단하지 않음 (TG18)',
+  8: '총빌리 1.5 mg/dL 이상일 때 간접 우세 1, 합토글로빈 30 미만 1, LDH 1.5× 이상 0.5, 혈색소 2 이상 감소 0.5',
+  9: '간염 혈청 검사 양성 (활동성 1.5) 또는 만성 바이러스 간염 과거력 0.5',
+  10: '근육 기원 (CK 5× 이상, AST ≥ 0.8×ALT) 1.5, 기저 간질환 과거력 1, 설명되지 않는 간세포형 1',
+}
+
+const calls: CauseCall[] = Object.entries(a3.flags)
+  .map(([code, f]) => {
+    const cause = CAUSE_NO[code]
+    return {
+      cause,
+      score: f.assessable ? f.score : null,
+      rule: RULE[cause],
+      support: f.support.map(s => evidenceOf(case01, s)),
+      against: (f.assessable ? f.against : []).map<Evidence>(text => ({ text })),
+      missing: f.assessable ? [] : f.against.map<Evidence>(text => ({ text })),
+      guide: GUIDE[cause],
+    }
+  })
+  .sort((a, b) => a.cause - b.cause)
 
 const hits = calls.filter(c => c.score !== null && c.score >= RULE_THRESHOLD).sort((a, b) => b.score! - a.score!)
+const supports = calls.flatMap(c => c.support)
+const matched = supports.filter(s => s.ref).length
+const hypoxic = calls.find(c => c.cause === 1)!
+const m1 = model1Of(run)
 
 const steps: AgentStep[] = [
   {
-    id: 's1', tool: 'build_case', title: '사례 자료 만들기', ms: 900,
-    summary: `t0 = ${mdhm(t0)} (ALT 공개 시각, 채혈 ${hm(drawn)}). 입실부터 t0 까지 공개된 기록만 씀`,
-    details: [
-      `검사 결과 ${nLab}건, 투약 기록 ${nAdmin}건, 활력징후 ${vitals.length}시간, 배양 ${micro.length}건 (그중 ${nPending}건은 결과 전)`,
-      `t0 뒤 실행 시각 (${hm(runAt)}) 까지 생긴 기록은 뺌: 검사 ${nLabCut}건, 투약 ${nAdminCut}건, 활력징후 ${nVitalCut}시간`,
-    ],
+    id: 's1', tool: 'build_snapshot', title: '사례 자료 만들기 (48시간 스냅숏)', ms: 900,
+    summary: `t0 = ${mdhm(t0)} (ALT 공개 시각, 채혈 ${hm(drawn)}). t0 까지 공개된 기록만, 48시간 창`,
+    details: [`검사 ${a3.snapshot.labs}종 (항목별 마지막 값), 활력징후·주입·투약 기록 ${a3.snapshot.context}건 (최근 150건까지)`],
   },
   {
     id: 's2', tool: 'detect_event', title: '사건 확인', ms: 600,
@@ -208,43 +130,30 @@ const steps: AgentStep[] = [
     details: ['ICU 입실 전 같은 입원에서 2배 이상인 기록 없음 → 분석 대상'],
   },
   {
-    id: 's3', tool: 'injury_pattern', title: '손상 패턴 계산', ms: 500,
-    summary: `R 비 ${R.toFixed(1)} → ${patternOf(R)}. AST/ALT ${(ast.value / alt.value).toFixed(1)}, LDH ${fmtNum(ldh.value, 0)} (${x('LDH', ldh.value)}배)`,
+    id: 's3', tool: 'injury_pattern', title: '손상 패턴 (ACG 2017 R 비)', ms: 500,
+    summary: `R 비 ${R.toFixed(1)} → ${a3.pattern ?? '계산 불가'}. AST ${x('AST', ast.value)}×, ALT ${x('ALT', alt.value)}×ULN`,
   },
   {
-    id: 's4', tool: 'query_evidence', title: '혈역학·산소화 근거', ms: 1100,
-    summary: `MAP 65 미만 ${hypo.length}시간 (최저 ${mapMin}), 노르에피네프린 최대 ${neMax}, 바소프레신 추가, 젖산 최고 ${fmtNum(lacMax.value, 1)}, SpO2 최저 ${spo2Min.spo2}%`,
+    id: 's4', tool: 'snapshot_context', title: '스냅숏 속 혈역학·투약', ms: 800,
+    summary: `MAP 최저 ${mapMin}, 노르에피네프린 최대 ${neMax}, 젖산 최고 ${fmtNum(lacMax.value, 1)}. 간독성 목록의 약: 피페라실린/타조박탐, 아세트아미노펜, 아미오다론`,
   },
   {
-    id: 's5', tool: 'query_evidence', title: '약물 노출', ms: 1000,
-    summary: `t0 전 투여 약 ${nDrug}종. 간독성 지식표에 있는 약: 아미오다론, 피페라실린/타조박탐, 아세트아미노펜`,
+    id: 's5', tool: 'rule_agent', title: `원인 규칙 (${a3.model})`, ms: 1000,
+    summary: `${RULE_THRESHOLD.toFixed(1)} 이상 ${hits.length}개: ${hits.map(c => `${causeName(c.cause)} ${c.score!.toFixed(1)}`).join(', ') || '없음'}. 담낭염은 판단 불가`,
+    details: hypoxic.score === 0 ? [`Hypoxic hepatitis 0: 규칙은 AST·ALT 5×ULN 부터 보는데 지금 최고 ${amino.toFixed(1)}×ULN`] : undefined,
   },
   {
-    id: 's6', tool: 'query_evidence', title: '감염 근거', ms: 800,
-    summary: `기관 흡인물 배양 S. pneumoniae (03-10 14:00 보고). ${hm(case01.micro.find(m => m.id === 'M6')!.collected)} 혈액배양은 t0 에 배양 중`,
-  },
-  {
-    id: 's7', tool: 'query_evidence', title: '심장·담도·비간성 근거', ms: 900,
-    summary: `CVP 최고 ${cvpMax}. 심초음파, BNP, 복부 영상 없음. 정맥영양 없음. CK ${ck.value} (${x('CK', ck.value)}배). 용혈 검사 없음`,
-  },
-  {
-    id: 's8', tool: 'lookup_knowledge', title: '지식표 조회', ms: 700,
-    summary: '아미오다론 정맥: 투여 직후 급성 간세포형 손상 드물게 보고. 피페라실린/타조박탐: 드물고 주로 담즙정체형',
-  },
-  {
-    id: 's9', tool: 'query_wiki', title: '근거 위키 조회', ms: 900,
+    id: 's6', tool: 'query_wiki', title: '근거 위키 조회', ms: 900,
     summary: `범주마다 진단 기준과 근거 공백을 원인 10개 근거 지도에서 가져옴 (${Object.values(GUIDE).flat().length}줄, 원문 13편). 담낭염 진단 기준 (TG18) 은 위키에 없음`,
   },
   {
-    id: 's9b', tool: 'score_rules', title: '원인 범주 10개 규칙 점수', ms: 900,
-    summary: `${RULE_THRESHOLD.toFixed(1)} 이상 ${hits.length}개: ${hits.map(c => `${causeName(c.cause)} ${c.score!.toFixed(1)}`).join(', ')}. 담낭염은 판단 불가`,
+    id: 's7', tool: 'query_model1', title: '간 검사 이상 패턴 군집 (모델 1)', ms: 700,
+    summary: m1 ? `${m1.cluster}, 확신도 ${m1.confidence.toFixed(2)}, 개발 사건의 ${Math.round(m1.share * 100)}%. 원인 판정에는 넣지 않음` : '군집 출력 없음',
   },
   {
-    id: 's10', tool: 'query_model1', title: '간 검사 이상 패턴 조회 (모델 1)', ms: 700,
-    summary: '군집 3, 확신도 0.81. 보조 정보로만 보여 주고 원인 판정에는 넣지 않음',
+    id: 's8', tool: 'verify_source', title: '원자료 대조', ms: 600,
+    summary: `규칙이 인용한 근거 ${supports.length}개 중 ${matched}개가 원자료 기록과 바로 이어짐`,
   },
-  { id: 's11', tool: 'write_summary', title: '요약 작성 (LLM)', ms: 1300, summary: '규칙 결과와 근거를 두 문장으로 요약. 규칙 점수는 바꾸지 않음' },
-  { id: 's12', tool: 'verify_source', title: '원자료 대조', ms: 700, summary: '출력 속 숫자와 시각 18개 모두 원자료와 일치' },
 ]
 
 const suspectDrugs: SuspectDrug[] = [
@@ -253,18 +162,25 @@ const suspectDrugs: SuspectDrug[] = [
   { drug: 'Acetaminophen', latency: `${lag(order('APAP').start)} (2회)`, hepatotox: '용량 의존', pattern: '650 mg 2회로 용량이 낮음', ref: { tab: 'mar', row: 'APAP' } },
 ]
 
+// 확인하면 좋을 검사: 규칙 결과에서 비거나 '의심' 에 머문 범주를 따라
+const tests: { name: string; why: string }[] = []
+if (hypoxic.score === 0 && mapMin < 65) tests.push({ name: '12~24시간 뒤 AST, ALT, LDH 재측정', why: `저관류 (MAP 최저 ${mapMin}) 뒤 5×ULN 을 넘는지. 규칙은 5×ULN 부터 Hypoxic hepatitis 를 봄` })
+if (hits.some(c => c.cause === 6)) tests.push({ name: '복부 초음파', why: 'TG18 C (담관 확장) 영상이 없어 담관염은 의심 수준까지만' })
+if (hits.some(c => c.cause === 4)) tests.push({ name: '투약 시작일과 잠복기 확인 (RUCAM)', why: '규칙은 48시간 안 투약 기록만 보고 잠복기는 보지 않음' })
+if (calls.find(c => c.cause === 2)!.score === 0) tests.push({ name: 'NT-proBNP, 심초음파', why: '울혈성 간병증 규칙에 필요한 심부전 근거가 자료에 없음' })
+
 export const runs: AgentRun[] = [
   {
-    caseId: 'c01', handwritten: true, ruleVersion: 'spec-1017', llm: '(연결 전)',
+    caseId: 'c01', handwritten: false, ruleVersion: a3.model, llm: '없음 (규칙 기준 모델)',
     steps,
-    summary: `쇼크 (MAP ${mapMin}, 노르에피네프린 ${neMax}) 가 사건 채혈보다 ${hoursBetween(hypo[0].time, drawn).toFixed(1)}시간 앞서고 AST 우세와 LDH 상승이 있어 Hypoxic hepatitis 에 해당합니다. 신속 심방세동과 CVP ${cvpMax} 로 Congestive hepatopathy 도 기준을 넘었지만 심초음파와 BNP 가 없어 근거가 약합니다.`,
+    summary: [
+      `원인 규칙 (${a3.model}) 결과 ${hits.map(c => `${causeName(c.cause)} ${c.score!.toFixed(1)}`).join(', ') || '해당 범주 없음'}.`,
+      `R 비 ${R.toFixed(1)} (${a3.pattern}).`,
+      hypoxic.score === 0 ? `Hypoxic hepatitis 는 규칙이 AST·ALT 5×ULN 부터 보는데 첫 이상 때 최고 ${amino.toFixed(1)}×ULN 이라 점수가 없습니다.` : '',
+    ].filter(Boolean).join(' '),
     calls,
     suspectDrugs,
-    recommendedTests: [
-      { name: '심초음파', why: 'Congestive hepatopathy 와 심기능 확인. 이 자료에 없음' },
-      { name: '복부 초음파와 Doppler', why: '간 혈류와 담도 확인 (담도폐쇄, 담낭염 배제)' },
-      { name: '12~24시간 뒤 AST, ALT, LDH 재측정', why: `허혈성이면 크게 오른 뒤 빠르게 내려감. 지금 ${itemOf(case01, 'ALT').name.split(' (')[0]} ${x('ALT', alt.value)}배` },
-    ],
-    verification: { total: 18, matched: 18, issues: [] },
+    recommendedTests: tests,
+    verification: { total: supports.length, matched, issues: supports.filter(s => !s.ref).map(s => ({ text: s.text, detail: '원자료 위치를 찾지 못함' })) },
   },
 ]

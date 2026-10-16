@@ -84,10 +84,11 @@ function CallRow({ c, open, onToggle, onJump, onWiki }: { c: CauseCall; open: bo
       {open && (
         <div className="call-body">
           {c.temporal && <div className="temporal"><span className="tm-icon" aria-hidden>⏱</span>{c.temporal}</div>}
-          <EvList kind="support" label="지지 근거" items={c.support} onJump={onJump} />
-          <EvList kind="against" label="반대 근거" items={c.against} onJump={onJump} />
-          <EvList kind="missing" label="없는 근거" items={c.missing} onJump={onJump} />
-          {!c.support.length && !c.against.length && !c.missing.length && <div className="ev muted">이 환자 기록에서 찾은 근거 없음</div>}
+          {c.rule && <div className="call-rule"><b>규칙</b> {c.rule}</div>}
+          <EvList kind="support" label="규칙이 찾은 근거" items={c.support} onJump={onJump} />
+          <EvList kind="against" label="반대 근거와 한계" items={c.against} onJump={onJump} />
+          <EvList kind="missing" label="판단하지 않는 이유" items={c.missing} onJump={onJump} />
+          {!c.support.length && !c.against.length && !c.missing.length && <div className="ev muted">규칙 조건에 맞는 기록 없음</div>}
           <GuideList items={c.guide} onWiki={onWiki} />
           <button className="link call-wiki" onClick={() => onWiki({ page: CAUSE_WIKI[c.cause].page })}>
             위키: {CAUSE_WIKI[c.cause].title} ›
@@ -167,7 +168,7 @@ export function Result({ run, models, onJump, onWiki }: Props) {
           <div className="m1">
             <span className="m1-cluster">{models.model1.cluster}</span>
             <span>확신도 <b>{models.model1.confidence.toFixed(2)}</b></span>
-            <span className="muted">개발 집단 {models.model1.devN.toLocaleString('en-US')}건</span>
+            <span className="muted">개발 사건의 {Math.round(models.model1.share * 100)}%</span>
           </div>
           <ul className="m1-feat">
             {models.model1.features.map(f => <li key={f}>{f}</li>)}

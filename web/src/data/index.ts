@@ -3,6 +3,7 @@ import { case01 } from './case01'
 import { runs } from './runs'
 import { modelOutputs } from './models'
 import { agent1At, agent4At } from './standin'
+import { a1Points, a4From, modelRun, type ModelRun } from './modelrun'
 import { A1_THRESHOLD, dischargeOf, endStateOf, EVENT_CODES, firstEvent, inIcu, K_FIRST, K_TARGET, normalAt, preIcuAbnormal, publicAt } from '../lib/events'
 import { ceilHour, hourly, toMs } from '../lib/time'
 
@@ -38,6 +39,8 @@ export interface Sim {
   }
   a4: { start?: string; at: (t: string) => A4Forecast[] }
   models?: ModelOutputs
+  /** 모델 패키지를 적용한 출력. 없으면 에이전트 1, 4 는 대체 계산 (standin.ts) */
+  run?: ModelRun
 }
 
 const sims = new Map<string, Sim>()
@@ -60,13 +63,16 @@ export function getSim(cs: CaseData): Sim {
     .sort((a, b) => toMs(a) - toMs(b))[0]
   const start = !excluded && firstPublic ? ceilHour(firstPublic) : undefined
   const stop = first ? first.detectAt : ticks.at(-1)
+  const run = modelRun(cs.id)
+  const fromModel = run ? new Map(a1Points(run).map(p => [p.time, p])) : null
   const points: A1Point[] = []
   const unknown: Sim['a1']['unknown'] = []
   if (start) {
     for (const t of ticks.filter(t => toMs(t) >= toMs(start) && toMs(t) < toMs(stop!))) {
       const n = normalAt(cs, t)
-      if (n.ok) points.push(agent1At(cs, t))
-      else unknown.push({ time: t, why: n.why! })
+      const p = n.ok ? (fromModel ? fromModel.get(t) : agent1At(cs, t)) : undefined
+      if (p) points.push(p)
+      else unknown.push({ time: t, why: n.why ?? '모델 출력 없음' })
     }
   }
 
@@ -78,8 +84,9 @@ export function getSim(cs: CaseData): Sim {
     discharge,
     endState: discharge?.judged ? endStateOf(discharge.recovered, dead) : undefined,
     a1: { start, stop, threshold: A1_THRESHOLD, points, unknown, firstAlarm: points.find(p => p.p >= A1_THRESHOLD)?.time },
-    a4: { start, at: t => agent4At(cs, t) },
+    a4: { start, at: t => (run ? a4From(run, cs, t) : agent4At(cs, t)) },
     models: getModels(cs.id),
+    run,
   }
   sims.set(cs.id, sim)
   return sim

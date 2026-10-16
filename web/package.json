@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "wiki": "node scripts/build-wiki.mjs ../wiki_kb public/wiki/kb.json",
-    "rag-server": "node server/rag-server.mjs"
+    "rag-server": "node server/rag-server.mjs",
+    "models": "rolldown model-bridge/export-case.ts --platform node --format esm -o model-bridge/.build/export-case.mjs && node model-bridge/.build/export-case.mjs model-bridge/cases/c01.json && ${KCD_PYTHON:-python3} model-bridge/run_models.py --package ${KCD_MODEL_PACKAGE:-../kcd_model_package_20261017_0043} --case model-bridge/cases/c01.json --out src/data/model/c01.json"
   },
   "dependencies": {
     "react": "^19.3.1",

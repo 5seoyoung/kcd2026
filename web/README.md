@@ -1,6 +1,6 @@
 # 간 검사 이상 에이전트 화면
 
-EMR 안에서 에이전트 네 개와 질의응답이 시간 흐름에 따라 작동하는 모습을 보여 주는 정적 웹 화면입니다 (KCD 2026 포스터용). 환자와 기록은 모두 손으로 만든 가상 자료입니다. 원인 추정은 미리 저장한 실행 기록을 재생하고, 나머지 에이전트 출력은 MIMIC 연구원의 모델을 받기 전까지 대체 계산 (`standin.ts`) 이나 예시값을 씁니다. 지식 근거는 근거 위키 (`../wiki_kb`, 원문 13편으로 만든 한국어 위키) 에서 가져옵니다.
+EMR 안에서 에이전트 네 개와 질의응답이 시간 흐름에 따라 작동하는 모습을 보여 주는 정적 웹 화면입니다 (KCD 2026 포스터용). 환자와 기록은 모두 손으로 만든 가상 자료입니다. 에이전트 출력은 MIMIC 연구원의 모델 패키지 (MIMIC-IV 학습, 고정) 를 이 가상 사례에 그대로 적용한 결과이고 (`npm run models`), 지식 근거는 근거 위키 (`../wiki_kb`, 원문 13편으로 만든 한국어 위키) 에서 가져옵니다.
 
 ## 실행
 
@@ -31,12 +31,12 @@ npm run wiki     # ../wiki_kb 가 바뀌면 public/wiki/kb.json 을 다시 만�
 
 위쪽 재생 버튼을 누르면 ICU 입실부터 퇴실까지 한 시간씩 넘어갑니다. 시간선을 누르거나 끌어도 기준 시각이 바뀝니다.
 
-| 에이전트 | 도는 시점 | 출력 | 지금 쓰는 값 |
+| 에이전트 | 도는 시점 | 출력 | 모델 (패키지 파일) |
 |---|---|---|---|
-| 1 발생 예측 | 첫 이상 전 매시간 (정상 구간만) | 24시간 안 5배 사건 확률, 경보 (30%). 멈춘 뒤 24시간 안 5배 사건으로 정답 확인 | `standin.ts` 의 대체 로지스틱 식 |
-| 2 종료 상태 | 첫 이상 때 한 번 | 회복 여부 x ICU 사망 여부 4경로 확률, ICU 사망 확률 (별도 모델) | `models.ts` 예시값 |
-| 3 원인 추정 | 첫 이상 때 한 번 | 원인 범주 10개마다 규칙 점수, 환자 근거, 근거 위키의 진단 기준과 근거 공백. 1.0 이상이면 해당 (여러 개 가능), 담낭염은 판단 불가. 군집 (모델 1) 은 보조 정보로만 표시 | `runs.ts` 손으로 쓴 실행 기록 |
-| 4 24시간 궤적 | 첫 간 검사 결과 뒤 매시간 | 6, 12, 18, 24시간 뒤 ALT, ALP, 총빌리의 10%, 50%, 90% 값 | `standin.ts` 의 감쇠 선형 추세 (실행안 기준 모델) |
+| 1 발생 예측 | 첫 이상 전 매시간 (정상 구간만) | 24시간 안 5배 사건 확률, 변수 묶음별 기여 (그룹 Shapley), 경보 (30%, 화면 설정). 멈춘 뒤 24시간 안 5배 사건으로 정답 확인 | 그래디언트 부스팅 `agent3_gbm.joblib` |
+| 2 종료 상태 | 첫 이상 때 한 번 | 회복 여부 x ICU 사망 여부 4경로 확률, ICU 사망 확률 (별도 모델), 모델이 본 주요 입력 | `prognosis_gbm.joblib` |
+| 3 원인 추정 | 첫 이상 때 한 번 | 원인 범주 10개마다 규칙 점수와 규칙이 인용한 근거, 근거 위키의 진단 기준과 근거 공백. 1.0 이상이면 해당 (여러 개 가능), 담낭염은 판단 불가. 간 패턴 군집은 보조 정보로만 표시 | 규칙 기준 모델 `rule_agent.py` (학습 없음), 군집 `cluster_models.joblib` |
+| 4 24시간 궤적 | 첫 간 검사 결과 뒤 매시간 | 6, 12, 18, 24시간 뒤 ALT, AST, ALP, 총빌리의 10%, 50%, 90% 값 (그 시각 24시간 안에 잰 항목만) | 분위 그래디언트 부스팅 `trajectory_qgbm.joblib` |
 | 질의응답 | 물을 때 | 이 환자 질문은 기준 시각까지의 사례 자료와 에이전트 출력으로, 지식 질문은 근거 위키를 검색해 답하고 원문과 쪽수를 붙임. 근거가 없거나 치료 결정 질문이면 답하지 않음 | `qa.ts` (이 환자), `rag.ts` + 근거 위키 (지식), 답 생성 서버 (선택) |
 
 재생 중에는 첫 경보, 첫 이상, 5배 사건, 퇴실 시점에서 멈추고 그 에이전트를 보여 줍니다. 첫 이상 때는 원인 추정이 단계별로 실행되는 모습을 보여 줍니다.
@@ -48,10 +48,12 @@ npm run wiki     # ../wiki_kb 가 바뀌면 public/wiki/kb.json 을 다시 만�
 | `src/types.ts` | 자료 형식. 사례 자료, 사건, 에이전트 출력 (`A1Point`, `A2Output`, `A4Forecast`, `AgentRun`, `CauseCall`, `ModelOutputs`), 질의응답 (`QaMsg`) |
 | `src/lib/events.ts` | 정의와 상수. 공개 시각, 사건 찾기, 정상 구간, 퇴실 때 판정, 기준 시각에 보이는 기록 |
 | `src/data/case01.ts` | 가상 사례 1 (쇼크 뒤 허혈성 손상, 회복 · 생존). 입실부터 퇴실까지 검사, 투약, 활력징후, 배양, 처치 |
-| `src/data/runs.ts` | 사례 1 의 원인 추정 실행 기록 (도구 호출 단계, 범주 10개 규칙 점수와 근거) |
+| `src/data/runs.ts` | 사례 1 의 원인 추정 실행 기록: 패키지 원인 규칙 출력 + 근거 위키 지침 근거 + 도구 호출 단계 |
+| `src/data/modelrun.ts`, `src/data/model/` | 모델 패키지 적용 출력과 화면 형식 변환 |
+| `model-bridge/` | 사례 내보내기와 모델 실행 (`npm run models`) |
 | `src/data/causes.ts` | 원인 범주 10개 (임상의 선생님 기준) |
 | `src/data/models.ts` | 모델 1 (군집) 과 에이전트 2 출력 자리 (`placeholder: true`) |
-| `src/data/standin.ts` | 에이전트 1, 4 의 대체 계산. 모델 출력을 받으면 바꿀 곳 |
+| `src/data/standin.ts` | 에이전트 1, 4 의 대체 계산 (모델 출력이 없는 사례용) |
 | `src/data/qa.ts` | 질의응답: 질문을 이 환자와 지식으로 나누고, 이 환자 질문의 답을 기준 시각 자료로 계산 |
 | `src/data/rag.ts` | 지식 질문: 근거 위키 검색, 답 생성 서버가 있으면 서버에 답을 맡김 |
 | `src/lib/bm25.ts`, `src/lib/wiki.ts`, `src/lib/md.ts` | 위키 검색 (BM25, 한글 두 글자), 질문 낱말 넓히기, 위키 마크다운 그리기 |
@@ -65,13 +67,25 @@ npm run wiki     # ../wiki_kb 가 바뀌면 public/wiki/kb.json 을 다시 만�
 | `src/assets/snuh_logo_white.svg`, `public/favicon.svg` | 상단 로고 (남색 바탕용) 와 브라우저 탭 아이콘. 원본은 `snuh_logo.svg` |
 | `src/styles.css` | 맨 위 `:root` 의 색과 글꼴 값만 바꾸면 전체 모양이 바뀝니다 |
 
-## 모델 출력 넣기
+## 모델 패키지 적용 (`npm run models`)
 
-- 에이전트 1: 정상 구간의 정시마다 `{ time, p, factors }` (`A1Point[]`). `getSim` 에서 `agent1At` 대신 이 배열을 쓰면 됩니다. 정상 구간 판단은 `normalAt` 이 합니다.
-- 에이전트 2: 사례마다 `{ probs: { 'rec-alive', 'rec-dead', 'norec-dead', 'norec-alive' }, icuDeath, factors }` 를 `models.ts` 에 넣습니다.
-- 에이전트 3: 사례마다 `AgentRun` (`calls` 에 범주 10개의 `score` 와 근거, `steps` 에 도구 호출 단계) 을 `runs.ts` 에 넣습니다.
-- 에이전트 4: 정시마다 항목별 `{ code, last, points: [{ h, time, v, lo, hi }] }` (`h` 는 6, 12, 18, 24, `lo` 와 `hi` 는 10%, 90%). `getSim` 의 `a4.at` 을 바꿉니다.
-- 모델 1: `models.ts` 의 `model1` (군집 번호, 확신도, 설명표 문장).
+MIMIC 연구원의 모델 패키지 (`../kcd_model_package_*`, 공개 저장소에는 올리지 않음) 를 가상 사례에 다시 학습 없이 적용합니다.
+
+1. `model-bridge/export-case.ts`: 가상 사례를 패키지 검사 이름 (TBIL, CREAT 등) 과 공개 시각으로 내보냄
+2. `model-bridge/run_models.py`: 패키지의 중간 표 모양 (cohort, lab, context, events) 으로 바꾼 뒤 패키지 함수를 그대로 부름. 변수 계산 `build_features`, 설명 `explain_rows`, 궤적 `forecast_rows`, 원인 규칙 `rule_agent1`, 군집 `assign_clusters`
+3. 결과 `src/data/model/c01.json` (환자 식별 번호 없음) 을 `src/data/modelrun.ts` 가 화면 형식으로 바꿈
+
+```bash
+# MODEL_CARD.md 와 같은 버전이 필요합니다: python 3.11, scikit-learn 1.9.0, pandas 2.3.3, numpy 2.4.6
+uv venv --python 3.11 .venv-models && uv pip install --python .venv-models/bin/python scikit-learn==1.9.0 pandas==2.3.3 numpy==2.4.6 joblib
+KCD_PYTHON=.venv-models/bin/python npm run models     # 패키지 위치가 다르면 KCD_MODEL_PACKAGE=<폴더>
+```
+
+- 화면 정의와 모델 출력의 첫 이상 시각이 다르면 `runs.ts` 가 오류를 냅니다 (사례를 바꾸면 다시 실행).
+- 패키지에 경보 운영 기준이 없어 발생 예측 경보 30% 는 화면 설정입니다 (`src/lib/events.ts` 의 `A1_THRESHOLD`).
+- 임상 표현형 군집은 개발 때 불안정 (부트스트랩 ARI 0.75 미만) 이라 패키지 규칙대로 쓰지 않습니다.
+- 사건 정의의 2·3·4배 민감도 모델 (`agent3_gbm_2x` 등) 과 48시간 경로 모델 (`agent2_gbm`) 은 화면에 쓰지 않습니다.
+- 모델 출력이 없는 새 사례는 에이전트 1, 4 에 대체 계산 (`standin.ts`) 을 씁니다.
 
 ## 질의응답과 근거 위키 (RAG)
 
@@ -96,8 +110,8 @@ GitHub Pages 화면에서 이 컴퓨터의 서버를 부르면 크롬이 로컬 
 
 ## 사례 추가
 
-1. `src/data/caseNN.ts` 를 `case01.ts` 와 같은 형식으로 만듭니다 (`icuIn`, `icuOut`, `outcome` 필수).
-2. `src/data/runs.ts` 에 원인 추정 실행 기록을, `src/data/models.ts` 에 모델 1 과 에이전트 2 출력을 넣습니다.
+1. `src/data/caseNN.ts` 를 `case01.ts` 와 같은 형식으로 만듭니다 (`icuIn`, `icuOut`, `admitTime`, `outcome` 필수).
+2. `model-bridge/export-case.ts` 와 `npm run models` 에 사례를 더해 모델 출력을 만들고, `modelrun.ts`, `runs.ts`, `models.ts` 에 연결합니다.
 3. `src/data/index.ts` 의 `cases` 에 추가하고, `patients.ts` 의 해당 환자에 `caseId` 를 붙입니다.
 
 근거의 `ref` (`{ tab, row, col | from, to }`) 가 원자료 탭의 행 id 와 맞아야 '원자료 ›' 나 질의응답 출처를 눌렀을 때 그 칸으로 이동합니다.

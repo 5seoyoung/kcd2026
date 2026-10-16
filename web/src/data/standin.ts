@@ -1,4 +1,4 @@
-// 에이전트 1 (발생 예측), 4 (24시간 궤적) 의 대체 계산. MIMIC 연구원의 모델을 받으면 같은 형식 (A1Point, A4Forecast) 의 출력으로 바꾼다.
+// 에이전트 1 (발생 예측), 4 (24시간 궤적) 의 대체 계산. 모델 패키지 출력 (src/data/model/<사례>.json) 이 없는 사례에서만 쓴다.
 // 둘 다 기준 시각까지 공개된 기록만 쓴다.
 import type { A1Point, A4Forecast, CaseData, Factor } from '../types'
 import { activeAt, EVENT_CODES, itemOf, seriesAt, uln } from '../lib/events'

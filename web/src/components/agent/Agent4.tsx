@@ -19,14 +19,13 @@ const short = (name: string) => name.split(' (')[0]
 
 export function Agent4({ cs, sim, clock, events }: Props) {
   const { at, ended, forecasts } = a4Now(cs, sim, clock)
-  if (!at || !forecasts.length) {
-    return <div className="ad-wait">간 검사 결과가 나오면 ICU 퇴실까지 매시간 실행합니다.</div>
-  }
+  if (!at) return <div className="ad-wait">간 검사 결과가 나오면 ICU 퇴실까지 매시간 실행합니다.</div>
+  if (!forecasts.length) return <div className="ad-wait">{mdhm(at)}: 최근 24시간 안에 잰 간 검사가 없어 이번 시각은 예측하지 않습니다.</div>
   return (
     <div className="ad">
       <div className="ad-head">
         <span className="ad-what">
-          <b>앞으로 24시간 ALT, ALP, 총빌리</b>
+          <b>앞으로 24시간 {forecasts.map(f => short(itemOf(cs, f.code).name)).join(', ')}</b>
           <span className="muted">{mdhm(at)} 실행 · {ended ? 'ICU 퇴실로 멈춤' : '매시간'}</span>
         </span>
         <span className="spacer" />
@@ -64,7 +63,7 @@ export function Agent4({ cs, sim, clock, events }: Props) {
         </tbody>
       </table>
       <p className="note">
-        실선은 측정값, 점선은 6, 12, 18, 24시간 뒤 예측 중앙값, 띠는 10~90% 범위입니다. 간 검사는 하루 1~2번이라 실제로는 다음 채혈 값을 예측하는 셈입니다. 칸에 마우스를 올리면 범위가 보입니다.
+        {sim.run ? 'MIMIC-IV 로 학습한 분위 그래디언트 부스팅. 그 시각 24시간 안에 잰 항목만 예측합니다. ' : ''}실선은 측정값, 점선은 6, 12, 18, 24시간 뒤 예측 중앙값, 띠는 10~90% 범위입니다. 간 검사는 하루 1~2번이라 실제로는 다음 채혈 값을 예측하는 셈입니다. 칸에 마우스를 올리면 범위가 보입니다.
       </p>
     </div>
   )

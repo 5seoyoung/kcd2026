@@ -116,6 +116,8 @@ export interface CaseData {
   id: string
   patientId: string
   admitDate: string
+  /** 병원 입원 시각 (모델 입력: 입원부터 ICU 입실까지 시간) */
+  admitTime?: string
   icuIn: string
   icuOut: string
   height: number
@@ -188,6 +190,8 @@ export interface CauseCall {
   cause: number
   /** 규칙 점수. RULE_THRESHOLD 이상이면 해당. null 은 판단 불가 (담낭염은 규칙상 항상 판단 불가) */
   score: number | null
+  /** 규칙이 이 범주를 보는 조건 */
+  rule?: string
   temporal?: string
   support: Evidence[]
   against: Evidence[]
@@ -222,8 +226,8 @@ export interface AgentRun {
 
 export interface Factor {
   name: string
-  /** '+' 는 위험을 높이거나 회복을 어렵게 하는 쪽 */
-  dir: '+' | '-'
+  /** '+' 는 위험을 높이거나 회복을 어렵게 하는 쪽. 없으면 방향 없이 모델 입력값만 보여 줌 */
+  dir?: '+' | '-'
   value?: string
 }
 
@@ -231,6 +235,8 @@ export interface Factor {
 export interface A1Point {
   time: string
   p: number
+  /** 설명의 기준값 (합성 기준 행에서의 평균 확률). 요인은 이 값에서 얼마나 올리고 내렸는지 */
+  base?: number
   factors: Factor[]
 }
 
@@ -259,7 +265,8 @@ export interface ModelOutputs {
     cluster: string
     confidence: number
     assignable: boolean
-    devN: number
+    /** 개발 사건 중 이 군집의 비율 */
+    share: number
     features: string[]
   }
   agent2: A2Output

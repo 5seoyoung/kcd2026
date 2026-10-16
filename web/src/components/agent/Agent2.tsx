@@ -135,10 +135,12 @@ export function Agent2({ cs, sim, clock, onJump }: Props) {
       </section>
 
       <section className="sub-card">
-        <h4>예측에 쓴 특징 <span className="h4-sub">t0 {mdhm(ev.t0)} 까지 공개된 기록</span></h4>
+        <h4>모델이 본 주요 입력 <span className="h4-sub">t0 {mdhm(ev.t0)} 까지 공개된 기록 · 변수 88개 중</span></h4>
         <FactorList factors={out.factors} up="불리" down="유리" />
       </section>
-      <p className="note">이 예측은 원인 추정 (에이전트 3) 의 판단에 넣지 않고 따로 보여 줍니다.</p>
+      <p className="note">
+        {sim.run ? 'MIMIC-IV 로 학습한 그래디언트 부스팅 (4경로, ICU 사망은 별도 모델). ' : ''}이 예측은 원인 추정 (에이전트 3) 의 판단에 넣지 않고 따로 보여 줍니다.
+      </p>
     </div>
   )
 }

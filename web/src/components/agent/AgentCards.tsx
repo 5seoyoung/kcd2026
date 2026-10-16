@@ -111,7 +111,8 @@ export function AgentCards({ cs, sim, clock, selected, onSelect, run, runState, 
   {
     const base = { id: 4 as const, name: '24시간 궤적', when: '매시간' }
     const { at, ended, forecasts } = a4Now(cs, sim, clock)
-    if (!at || !forecasts.length) cards.push({ ...base, status: 'wait', statusText: '대기', main: '–', sub: '첫 간 검사 결과 대기', stamp: 'wait' })
+    if (!at) cards.push({ ...base, status: 'wait', statusText: '대기', main: '–', sub: '첫 간 검사 결과 대기', stamp: 'wait' })
+    else if (!forecasts.length) cards.push({ ...base, status: 'live', statusText: '매시간', main: <span className="agc-unk">예측 없음</span>, sub: '최근 24시간 안 간 검사 없음', stamp: `n-${at}` })
     else {
       const f = forecasts.reduce((a, b) => (b.last.value / uln(cs, b.code) > a.last.value / uln(cs, a.code) ? b : a))
       const it = itemOf(cs, f.code)

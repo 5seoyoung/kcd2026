@@ -20,6 +20,10 @@ const labItems: LabItem[] = [
   { code: 'CK', name: 'CK', unit: 'IU/L', low: 20, high: 200, group: '근육·용혈', dp: 0 },
   { code: 'LDH', name: 'LDH', unit: 'IU/L', low: 100, high: 225, group: '근육·용혈', dp: 0 },
   { code: 'CR', name: 'Creatinine', unit: 'mg/dL', low: 0.7, high: 1.3, group: '신장', dp: 1 },
+  { code: 'BUN', name: 'BUN', unit: 'mg/dL', low: 6, high: 20, group: '신장', dp: 0 },
+  { code: 'NA', name: 'Sodium', unit: 'mmol/L', low: 135, high: 145, group: '전해질·대사', dp: 0 },
+  { code: 'GLU', name: 'Glucose', unit: 'mg/dL', low: 70, high: 140, group: '전해질·대사', dp: 0 },
+  { code: 'HCO3', name: 'Bicarbonate', unit: 'mmol/L', low: 22, high: 29, group: '전해질·대사', dp: 0 },
   { code: 'LAC', name: 'Lactate', unit: 'mmol/L', low: 0.5, high: 2.0, group: '혈액가스', dp: 1 },
   { code: 'WBC', name: 'WBC', unit: '10³/µL', low: 4, high: 10, group: '혈액·염증', dp: 1 },
   { code: 'HB', name: 'Hb', unit: 'g/dL', low: 13, high: 17, group: '혈액·염증', dp: 1 },
@@ -32,24 +36,24 @@ function panel(id: string, charttime: string, storetime: string, values: Record<
 }
 
 const labs: LabResult[] = [
-  ...panel('P0', '2026-03-08 21:40', '2026-03-08 22:35', { ALT: 28, AST: 35, ALP: 88, TB: 0.8, DB: 0.2, GGT: 30, INR: 1.1, ALB: 3.4, CK: 140, LDH: 210, CR: 1.1, LAC: 2.1, WBC: 15.8, HB: 13.1, PLT: 210, CRP: 18.2 }, { LAC: '2026-03-08 21:50' }),
-  ...panel('P1', '2026-03-09 05:00', '2026-03-09 06:10', { ALT: 31, AST: 40, ALP: 92, TB: 0.9, DB: 0.3, GGT: 33, INR: 1.12, ALB: 3.1, CK: 165, LDH: 215, CR: 1.2, LAC: 1.6, WBC: 17.2, HB: 12.4, PLT: 188, CRP: 21.5 }, { LAC: '2026-03-09 05:10' }),
-  ...panel('P2', '2026-03-10 05:00', '2026-03-10 06:05', { ALT: 35, AST: 44, ALP: 95, TB: 1.0, DB: 0.3, GGT: 34, INR: 1.15, ALB: 3.0, CK: 180, LDH: 222, CR: 1.2, LAC: 1.4, WBC: 14.1, HB: 12.0, PLT: 172, CRP: 16.3 }, { LAC: '2026-03-10 05:10' }),
+  ...panel('P0', '2026-03-08 21:40', '2026-03-08 22:35', { ALT: 28, AST: 35, ALP: 88, TB: 0.8, DB: 0.2, GGT: 30, INR: 1.1, ALB: 3.4, CK: 140, LDH: 210, CR: 1.1, LAC: 2.1, WBC: 15.8, HB: 13.1, PLT: 210, CRP: 18.2, BUN: 24, NA: 137, GLU: 168, HCO3: 21 }, { LAC: '2026-03-08 21:50' }),
+  ...panel('P1', '2026-03-09 05:00', '2026-03-09 06:10', { ALT: 31, AST: 40, ALP: 92, TB: 0.9, DB: 0.3, GGT: 33, INR: 1.12, ALB: 3.1, CK: 165, LDH: 215, CR: 1.2, LAC: 1.6, WBC: 17.2, HB: 12.4, PLT: 188, CRP: 21.5, BUN: 26, NA: 138, GLU: 142, HCO3: 22 }, { LAC: '2026-03-09 05:10' }),
+  ...panel('P2', '2026-03-10 05:00', '2026-03-10 06:05', { ALT: 35, AST: 44, ALP: 95, TB: 1.0, DB: 0.3, GGT: 34, INR: 1.15, ALB: 3.0, CK: 180, LDH: 222, CR: 1.2, LAC: 1.4, WBC: 14.1, HB: 12.0, PLT: 172, CRP: 16.3, BUN: 27, NA: 139, GLU: 136, HCO3: 23 }, { LAC: '2026-03-10 05:10' }),
   ...panel('P3', '2026-03-10 18:00', '2026-03-10 18:12', { LAC: 5.9 }),
   // 쇼크 뒤 응급 검사: ALT 첫 이상 (2배). t0 = 공개 시각 21:25
-  ...panel('PE', '2026-03-10 20:30', '2026-03-10 21:25', { ALT: 96, AST: 182, ALP: 104, TB: 1.2, DB: 0.4, INR: 1.38, CK: 260, LDH: 520, CR: 1.5, HB: 11.8, PLT: 150 }),
+  ...panel('PE', '2026-03-10 20:30', '2026-03-10 21:25', { ALT: 96, AST: 182, ALP: 104, TB: 1.2, DB: 0.4, INR: 1.38, CK: 260, LDH: 520, CR: 1.5, HB: 11.8, PLT: 150, BUN: 31, NA: 136, GLU: 198, HCO3: 17 }),
   ...panel('P4', '2026-03-10 22:10', '2026-03-10 22:20', { LAC: 6.8 }),
   ...panel('P5', '2026-03-11 02:00', '2026-03-11 02:10', { LAC: 4.2 }),
   // 아침 정기 검사: ALT 5배 사건 (에이전트 1 의 정답). 공개 07:42
-  ...panel('P6', '2026-03-11 06:05', '2026-03-11 07:42', { ALT: 412, AST: 689, ALP: 121, TB: 1.6, DB: 0.6, GGT: 48, INR: 1.72, ALB: 2.8, CK: 410, LDH: 1240, CR: 1.9, LAC: 3.1, WBC: 19.6, HB: 11.2, PLT: 121, CRP: 14.8 }, { LAC: '2026-03-11 06:15' }),
-  ...panel('P7', '2026-03-11 14:00', '2026-03-11 15:05', { ALT: 538, AST: 812, ALP: 124, TB: 1.8, DB: 0.7, INR: 1.85, CK: 380, LDH: 1410, CR: 2.1, LAC: 2.0 }),
-  ...panel('P8', '2026-03-12 05:00', '2026-03-12 06:10', { ALT: 486, AST: 455, ALP: 118, TB: 1.9, DB: 0.8, GGT: 52, INR: 1.52, ALB: 2.7, CK: 300, LDH: 820, CR: 2.0, LAC: 1.5, WBC: 16.2, HB: 10.9, PLT: 108, CRP: 10.1 }),
-  ...panel('P9', '2026-03-13 05:00', '2026-03-13 06:05', { ALT: 302, AST: 168, ALP: 112, TB: 1.6, DB: 0.6, INR: 1.31, LDH: 410, CR: 1.6, WBC: 12.8, PLT: 115, CRP: 6.4 }),
-  ...panel('P10', '2026-03-14 05:00', '2026-03-14 06:00', { ALT: 176, AST: 79, ALP: 108, TB: 1.3, INR: 1.18, LDH: 280, CR: 1.3, WBC: 11.0, HB: 10.8, PLT: 142, CRP: 4.2 }),
-  ...panel('P11', '2026-03-15 05:00', '2026-03-15 06:10', { ALT: 104, AST: 51, ALP: 104, TB: 1.1, INR: 1.12, CR: 1.2 }),
+  ...panel('P6', '2026-03-11 06:05', '2026-03-11 07:42', { ALT: 412, AST: 689, ALP: 121, TB: 1.6, DB: 0.6, GGT: 48, INR: 1.72, ALB: 2.8, CK: 410, LDH: 1240, CR: 1.9, LAC: 3.1, WBC: 19.6, HB: 11.2, PLT: 121, CRP: 14.8, BUN: 38, NA: 137, GLU: 176, HCO3: 19 }, { LAC: '2026-03-11 06:15' }),
+  ...panel('P7', '2026-03-11 14:00', '2026-03-11 15:05', { ALT: 538, AST: 812, ALP: 124, TB: 1.8, DB: 0.7, INR: 1.85, CK: 380, LDH: 1410, CR: 2.1, LAC: 2.0, BUN: 41, NA: 138, HCO3: 21 }),
+  ...panel('P8', '2026-03-12 05:00', '2026-03-12 06:10', { ALT: 486, AST: 455, ALP: 118, TB: 1.9, DB: 0.8, GGT: 52, INR: 1.52, ALB: 2.7, CK: 300, LDH: 820, CR: 2.0, LAC: 1.5, WBC: 16.2, HB: 10.9, PLT: 108, CRP: 10.1, BUN: 44, NA: 140, GLU: 152, HCO3: 22 }),
+  ...panel('P9', '2026-03-13 05:00', '2026-03-13 06:05', { ALT: 302, AST: 168, ALP: 112, TB: 1.6, DB: 0.6, INR: 1.31, LDH: 410, CR: 1.6, WBC: 12.8, PLT: 115, CRP: 6.4, BUN: 39, NA: 141, GLU: 138, HCO3: 24 }),
+  ...panel('P10', '2026-03-14 05:00', '2026-03-14 06:00', { ALT: 176, AST: 79, ALP: 108, TB: 1.3, INR: 1.18, LDH: 280, CR: 1.3, WBC: 11.0, HB: 10.8, PLT: 142, CRP: 4.2, BUN: 30, NA: 140, GLU: 131, HCO3: 25 }),
+  ...panel('P11', '2026-03-15 05:00', '2026-03-15 06:10', { ALT: 104, AST: 51, ALP: 104, TB: 1.1, INR: 1.12, CR: 1.2, BUN: 24, NA: 139, GLU: 124 }),
   // ALT 71: 2 x ULN (80) 미만으로 내려옴. 퇴실 때 마지막 값 (P13) 으로 회복 판정
-  ...panel('P12', '2026-03-16 05:00', '2026-03-16 06:05', { ALT: 71, AST: 38, ALP: 101, TB: 1.0, INR: 1.1, CR: 1.1, WBC: 9.8, HB: 11.0, PLT: 178, CRP: 2.6 }),
-  ...panel('P13', '2026-03-17 05:00', '2026-03-17 06:00', { ALT: 58, AST: 32, ALP: 98, TB: 0.9, INR: 1.08, CR: 1.0 }),
+  ...panel('P12', '2026-03-16 05:00', '2026-03-16 06:05', { ALT: 71, AST: 38, ALP: 101, TB: 1.0, INR: 1.1, CR: 1.1, WBC: 9.8, HB: 11.0, PLT: 178, CRP: 2.6, BUN: 20, NA: 138, GLU: 118, HCO3: 25 }),
+  ...panel('P13', '2026-03-17 05:00', '2026-03-17 06:00', { ALT: 58, AST: 32, ALP: 98, TB: 0.9, INR: 1.08, CR: 1.0, BUN: 18, NA: 138, GLU: 112 }),
 ]
 
 function q(times: string[]): MarOrder['admins'] {
@@ -177,6 +181,8 @@ export const case01: CaseData = {
   id: 'c01',
   patientId: 'p07',
   admitDate: '2026-03-08',
+  // 응급실을 거쳐 같은 날 ICU 입실
+  admitTime: '2026-03-08 18:40',
   icuIn: ICU_IN,
   icuOut: ICU_OUT,
   height: 168,
