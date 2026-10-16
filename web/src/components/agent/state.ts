@@ -6,8 +6,7 @@ import { addHours, hoursBetween, isAfter } from '../../lib/time'
 
 export type RunState = { phase: 'idle' | 'running' | 'done'; step: number }
 
-/** 작은 확률은 소수 한 자리까지 */
-export const pct = (p: number) => (p < 0.001 ? '<0.1%' : p < 0.1 ? `${(p * 100).toFixed(1)}%` : `${Math.round(p * 100)}%`)
+export { pct } from '../../lib/ui'
 
 /** 에이전트 1: 기준 시각의 마지막 출력, 이번 시각이 판정 불가인지, 멈췄는지 */
 export function a1Now(sim: Sim, clock: string): { point?: A1Point; unknown?: string; started: boolean; ended: boolean } {

@@ -4,18 +4,17 @@ import { runs } from './runs'
 import { modelOutputs } from './models'
 import { agent1At, agent4At } from './standin'
 import { a1Points, a4From, modelRun, type ModelRun } from './modelrun'
-import { A1_THRESHOLD, dischargeOf, endStateOf, EVENT_CODES, firstEvent, K_FIRST, K_TARGET, lastAt, normalAt, preIcuAbnormal, publicAt } from '../lib/events'
-import { addHours, ceilHour, hourly, isAfter, toMs } from '../lib/time'
+import { A1_THRESHOLD, dischargeOf, endStateOf, EVENT_CODES, firstEvent, K_FIRST, K_TARGET, normalAt, preIcuAbnormal, publicAt } from '../lib/events'
+import { ceilHour, hourly, isAfter, toMs } from '../lib/time'
+import { siteNotices } from '../lib/uncertainty'
 
-/** 화면 표시 확신 (모델 출력 아님): 핵심 입력 젖산과 INR 이 최근 24시간 안에 공개되어 있는지 */
-function a1Confidence(cs: CaseData, t: string): A1Point['confidence'] {
-  const why: string[] = []
-  for (const [code, name] of [['LAC', '젖산'], ['INR', 'INR']] as const) {
-    const r = lastAt(cs, code, t)
-    if (!r) why.push(`${name} 측정 없음`)
-    else if (isAfter(addHours(t, -24), r.charttime)) why.push(`${name} 24시간 안 측정 없음`)
-  }
-  return why.length ? { level: '낮음', why: why.join(', ') } : { level: '높음' }
+/**
+ * 조기 예측 대상 아님 사유 (정상 구간이 한 번도 없음): ICU 에서 처음 잰 사건 항목이 이미 2배 이상이면 '입실 때 이미 이상',
+ * 아니면 세 항목을 24시간 안에 함께 잰 적이 없음.
+ */
+function notEligibleWhy(cs: CaseData, first?: LiverEvent): string {
+  const icu = cs.labs.filter(r => EVENT_CODES.includes(r.code) && !isAfter(cs.icuIn, r.charttime)).sort((a, b) => toMs(a.charttime) - toMs(b.charttime))
+  return first && icu[0]?.charttime === first.drawn ? '입실 때 이미 이상' : '세 항목 24시간 안 측정 없음'
 }
 
 const cases: CaseData[] = CASES
@@ -47,13 +46,15 @@ export interface Sim {
     /** 정상 구간이 아니라 판정하지 않은 시각과 이유 */
     unknown: { time: string; why: string }[]
     firstAlarm?: string
-    /** 대상 아님: 입실 뒤 첫 측정부터 이상이라 정상 구간이 한 번도 없음 */
+    /** 대상 아님 사유: 정상 구간이 한 번도 없음 ('입실 때 이미 이상' 또는 '세 항목 24시간 안 측정 없음') */
     notEligible?: string
   }
   a4: { start?: string; at: (t: string) => A4Forecast[] }
   models?: ModelOutputs
   /** 모델 패키지를 적용한 출력. 없으면 에이전트 1, 4 는 대체 계산 (standin.ts) */
   run?: ModelRun
+  /** 병원 공지: 이 병원 자료 전체에 해당하는 한계 */
+  notices: string[]
 }
 
 const sims = new Map<string, Sim>()
@@ -85,7 +86,7 @@ export function getSim(cs: CaseData): Sim {
     for (const t of ticks.filter(t => toMs(t) >= toMs(start) && toMs(t) < toMs(stop!))) {
       const n = normalAt(cs, t)
       const p = n.ok ? (fromModel ? fromModel.get(t) : agent1At(cs, t)) : undefined
-      if (p) points.push({ ...p, confidence: a1Confidence(cs, t) })
+      if (p) points.push(p)
       else unknown.push({ time: t, why: n.why ?? '모델 출력 없음' })
     }
   }
@@ -99,11 +100,12 @@ export function getSim(cs: CaseData): Sim {
     endState: discharge?.judged ? endStateOf(discharge.recovered, dead) : undefined,
     a1: {
       start, stop, threshold: A1_THRESHOLD, points, unknown, firstAlarm: points.find(p => p.p >= A1_THRESHOLD)?.time,
-      notEligible: first && !points.length ? '입실 뒤 첫 측정부터 이상 (정상 구간 없음)' : undefined,
+      notEligible: !points.length && (first || start) ? notEligibleWhy(cs, first) : undefined,
     },
     a4: { start, at: t => (run ? a4From(run, cs, t) : agent4At(cs, t)) },
     models: getModels(cs.id),
     run,
+    notices: siteNotices(run?.meta.connected),
   }
   sims.set(cs.id, sim)
   return sim

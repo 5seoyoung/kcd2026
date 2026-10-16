@@ -7,6 +7,7 @@ import { cls } from '../../lib/ui'
 import { EventCard } from './EventCard'
 import { FactorList } from './FactorList'
 import { pct } from './state'
+import { labLabel, PATH_MASS } from '../../lib/uncertainty'
 
 interface Props {
   cs: CaseData
@@ -59,6 +60,8 @@ export function Agent2({ cs, sim, clock, onJump }: Props) {
   const over = rows.filter(r => r.last && r.last.value >= r.lim)
   const dt = cs.outcome.deathTime
   const deathAfterOut = !!dt && isAfter(dt, cs.icuOut)
+  const inSet = new Set(out.pathSet.keys)
+  const notRe = rec.notRemeasured.map(c => labLabel(cs, c)).join(', ')
 
   return (
     <div className="ad">
@@ -68,7 +71,7 @@ export function Agent2({ cs, sim, clock, onJump }: Props) {
         <h4>ICU 퇴실 때 종료 상태 <span className="h4-sub">{mdhm(ev.detectAt)} 실행 · 첫 이상 때 1회</span></h4>
         <div className="es" role="table" aria-label="종료 상태 확률">
           {END_STATES.map(s => (
-            <div key={s.key} role="row" className={cls('es-row', s.key === top.key && 'top', actual === s.key && 'actual')}>
+            <div key={s.key} role="row" className={cls('es-row', s.key === top.key && 'top', actual === s.key && 'actual', inSet.has(s.key) && 'inset')}>
               <span role="cell" className="es-label">{s.label}</span>
               <span role="cell" className="es-track"><span className="es-fill" style={{ width: `${out.probs[s.key] * 100}%` }} /></span>
               <span role="cell" className="es-val">{pct(out.probs[s.key])}</span>
@@ -76,6 +79,16 @@ export function Agent2({ cs, sim, clock, onJump }: Props) {
             </div>
           ))}
         </div>
+        <div className="pathset">
+          <span className={cls('conf', out.confidence.level === '낮음' ? 'c-낮음' : 'c-높음')}>확신 {out.confidence.level}</span>
+          <span>
+            이 중 하나일 가능성이 높음: <b>{END_STATES.filter(s => inSet.has(s.key)).map(s => s.label).join(', ')}</b>
+            <span className="muted"> (합 {pct(out.pathSet.mass)})</span>
+          </span>
+        </div>
+        <p className="note">
+          경로 집합은 임시 기준입니다: 확률 큰 순으로 더해 {Math.round(PATH_MASS * 100)}% 에 이를 때까지 넣고, 실제로 이 안에 들 것이라는 보장은 없습니다 (conformal 기준을 받으면 바꿈). 경로가 둘 이상이면 확신 낮음 (규칙 6).
+        </p>
         <div className="es-extra">
           <span>ICU 사망</span>
           <b>{pct(out.icuDeath)}</b>
@@ -120,7 +133,9 @@ export function Agent2({ cs, sim, clock, onJump }: Props) {
         </div>
         <ul className="track">
           {!rec.judged ? (
-            <li>첫 이상 뒤 다시 재지 않은 항목: {rec.notRemeasured.map(c => short(itemOf(cs, c).name)).join(', ')} · {done ? '판정 불가' : '이대로 퇴실하면 판정 불가'}</li>
+            done
+              ? <li>첫 이상 뒤 다시 재지 않고 퇴실한 항목이 있어 판정 불가: {notRe}</li>
+              : <li className="need-test"><b>회복 판정에 필요한 검사</b> {notRe} 퇴실 전 재측정 필요 (없으면 판정 불가)</li>
           ) : over.length ? (
             <li>아직 2배 이상: {over.map(r => short(r.item.name)).join(', ')} · {done ? '미회복' : '이대로 퇴실하면 미회복'}</li>
           ) : (

@@ -46,7 +46,7 @@ export function AgentCards({ cs, sim, clock, selected, onSelect, run, runState, 
     const v = a1Verdict(sim, clock)
     if (sim.excluded) cards.push({ ...base, status: 'off', statusText: '대상 아님', main: '–', sub: 'ICU 입실 전 이미 2배 이상', stamp: 'na' })
     else if (sim.a1.notEligible && sim.first && !isAfter(sim.first.detectAt, clock))
-      cards.push({ ...base, status: 'off', statusText: '대상 아님', main: '대상 아님', sub: '입실 뒤 첫 측정부터 이상', stamp: 'na' })
+      cards.push({ ...base, status: 'off', statusText: '대상 아님', main: '조기 예측 대상 아님', sub: sim.a1.notEligible, stamp: 'na' })
     else if (!started) cards.push({ ...base, status: 'wait', statusText: '대기', main: '–', sub: '첫 간 검사 결과 대기', stamp: 'wait' })
     else if (v) {
       const main =
@@ -84,7 +84,7 @@ export function AgentCards({ cs, sim, clock, selected, onSelect, run, runState, 
       const actual = END_STATES.find(s => s.key === sim.endState)
       cards.push({
         ...base, status: 'done', statusText: '완료', stamp: 'done',
-        main: <>{top.label} <b className="agc-num">{pct(out.probs[top.key])}</b></>,
+        main: <>{top.label} <b className="agc-num">{pct(out.probs[top.key])}</b>{out.confidence.level === '낮음' && <span className="agc-low">확신 낮음</span>}</>,
         sub: done ? (actual ? `실제 ${actual.label}` : '실제 판정 불가') : `ICU 퇴실 때 · ${mdhm(sim.first!.detectAt)} 실행`,
       })
     }
@@ -104,7 +104,12 @@ export function AgentCards({ cs, sim, clock, selected, onSelect, run, runState, 
       cards.push({
         ...base, status: 'done', statusText: '완료', stamp: 'done',
         main: hits.length ? <><b>{causeName(hits[0].cause)}</b>{hits.length > 1 && <span className="muted"> 외 {hits.length - 1}</span>}</> : '해당 범주 없음',
-        sub: `범주 10개 중 ${hits.length}개 해당 · ${mdhm(sim.first!.detectAt)} 실행`,
+        sub: [
+          `범주 10개 중 ${hits.length}개 해당`,
+          run.calls.some(c => c.fragile?.length) ? `판정 취약 ${run.calls.filter(c => c.fragile?.length).length}` : '',
+          run.calls.some(c => c.hold) ? `판단 보류 ${run.calls.filter(c => c.hold).length}` : '',
+          `${mdhm(sim.first!.detectAt)} 실행`,
+        ].filter(Boolean).join(' · '),
       })
     } else cards.push({ ...base, status: 'wait', statusText: '대기', main: '실행 전', sub: '원인 범주 10개 규칙 판정', stamp: 'idle' })
   }

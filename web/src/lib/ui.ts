@@ -4,6 +4,9 @@ import { inRange, isAfter } from './time'
 
 export type Highlight = { ref: Ref; n: number } | null
 
+/** 확률. 작은 확률은 소수 한 자리까지 */
+export const pct = (p: number) => (p < 0.001 ? '<0.1%' : p < 0.1 ? `${(p * 100).toFixed(1)}%` : `${Math.round(p * 100)}%`)
+
 export const cls = (...xs: (string | false | null | undefined)[]) => xs.filter(Boolean).join(' ')
 
 export const isRowHl = (hl: Highlight, tab: TabId, row: string) =>

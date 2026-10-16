@@ -16,17 +16,23 @@ interface Props {
 }
 
 const short = (name: string) => name.split(' (')[0]
+/** 궤적 모델이 예측하는 항목. 그 시각 24시간 안에 잰 값이 없으면 예측하지 않음 */
+const TRAJ = ['ALT', 'AST', 'ALP', 'TB']
 
 export function Agent4({ cs, sim, clock, events }: Props) {
   const { at, ended, forecasts } = a4Now(cs, sim, clock)
   if (!at) return <div className="ad-wait">간 검사 결과가 나오면 ICU 퇴실까지 매시간 실행합니다.</div>
   if (!forecasts.length) return <div className="ad-wait">{mdhm(at)}: 최근 24시간 안에 잰 간 검사가 없어 이번 시각은 예측하지 않습니다.</div>
+  const skipped = TRAJ.filter(c => !forecasts.some(f => f.code === c))
   return (
     <div className="ad">
       <div className="ad-head">
         <span className="ad-what">
           <b>앞으로 24시간 {forecasts.map(f => short(itemOf(cs, f.code).name)).join(', ')}</b>
-          <span className="muted">{mdhm(at)} 실행 · {ended ? 'ICU 퇴실로 멈춤' : '매시간'}</span>
+          <span className="muted">
+            {mdhm(at)} 실행 · {ended ? 'ICU 퇴실로 멈춤' : '매시간'}
+            {skipped.length > 0 && <> · <span className="warn-ink">{skipped.map(c => short(itemOf(cs, c).name)).join(', ')} 예측 안 함</span></>}
+          </span>
         </span>
         <span className="spacer" />
         <span className="legend">
@@ -60,10 +66,22 @@ export function Agent4({ cs, sim, clock, events }: Props) {
               </tr>
             )
           })}
+          {skipped.map(code => {
+            const it = itemOf(cs, code)
+            const last = seriesAt(cs, code, at).at(-1)
+            return (
+              <tr key={code} className="nofc">
+                <td><b>{short(it.name)}</b></td>
+                <td>{last ? <>{fmtNum(last.value, it.dp)} <span className="mono muted">{mdhm(last.charttime)}</span></> : <span className="muted">없음</span>}</td>
+                <td colSpan={HORIZONS.length + 1} className="warn-ink">최근 24시간 측정 없음 · 예측 안 함</td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
       <p className="note">
         {sim.run ? 'MIMIC-IV 로 학습한 분위 그래디언트 부스팅. 그 시각 24시간 안에 잰 항목만 예측합니다. ' : ''}실선은 측정값, 점선은 6, 12, 18, 24시간 뒤 예측 중앙값, 띠는 10~90% 범위입니다. 간 검사는 하루 1~2번이라 실제로는 다음 채혈 값을 예측하는 셈입니다. 칸에 마우스를 올리면 범위가 보입니다.
+        10~90% 띠는 MIMIC 개발 자료로 맞춘 범위이고, 이 병원 자료에서 실제로 몇 % 를 담는지 (포함률) 는 아직 확인하지 않았습니다.
       </p>
     </div>
   )

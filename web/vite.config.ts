@@ -6,5 +6,5 @@ export default defineConfig({
   base: './',
   plugins: [react()],
   // 모델 출력 (src/data/model/*.json) 이 함께 묶여 크다
-  build: { chunkSizeWarningLimit: 800 },
+  build: { chunkSizeWarningLimit: 1000 },
 })

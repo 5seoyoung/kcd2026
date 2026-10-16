@@ -137,6 +137,8 @@ export interface CaseData {
   }
   /** 이전 입원 (과거력 모델 입력). 이번 ICU 입실 전에 퇴원한 입원의 진단 코드 */
   history?: { admitted: string; discharged: string; codes: { code: string; version: 9 | 10; name: string }[] }[]
+  /** 간염 혈청 검사 (원인 규칙 9 입력). 이름과 결과 문자열 그대로 */
+  serology?: { id: string; label: string; value: string; time: string; reported: string }[]
   labItems: LabItem[]
   labs: LabResult[]
   mar: MarOrder[]
@@ -204,6 +206,20 @@ export interface CauseCall {
   missing: Evidence[]
   /** 근거 위키의 진단 기준과 근거 공백 */
   guide: GuideLine[]
+  /** 근거 자료 완성도: 이 범주 판단에 필요한 자료 가운데 있는 것 */
+  evidence?: { have: number; need: number; items: EvidenceItem[] }
+  /** 판정 취약: 규칙이 읽은 검사값 하나를 검사 오차 범위만큼 바꾸면 0/1 이 바뀜 (바뀌는 경우 목록) */
+  fragile?: string[]
+  /** 판단 보류 사유 (해당이나 해당 아님으로 정하기 어려움) */
+  hold?: string
+}
+
+/** 근거 자료의 상태. 연결 안 됨 (연결부가 넘기지 않음) 과 측정 없음 (넘기지만 이 환자에게 없음) 을 구분 */
+export type EvidenceStatus = '있음' | '측정 없음' | '연결 안 됨' | '자료에 없음' | '이전 입원 없음'
+export interface EvidenceItem {
+  name: string
+  status: EvidenceStatus
+  detail?: string
 }
 
 export interface SuspectDrug {
@@ -229,11 +245,21 @@ export interface AgentRun {
   suspectDrugs: SuspectDrug[]
   recommendedTests: { name: string; why: string }[]
   verification: { total: number; matched: number; issues: { text: string; detail: string }[] }
-  /** 화면 표시 확신 (규칙 결과에서 계산, 모델 출력 아님) */
-  confidence?: { level: '높음' | '중간' | '낮음' | '판단 보류'; why: string }
+  /** 원인 규칙의 판단 보류 (가장 높은 점수가 약하거나 해당 범주가 없음) */
+  abstain?: string
 }
 
 // ───────── 에이전트 1, 2, 4 와 모델 1 출력 (다른 곳에서 만든 모델이 들어올 자리) ─────────
+
+/** 확신 규칙 (불확실성 구현 명세 10/17, 미리 고정). 1~5 는 발생 예측, 6 은 예후 */
+export interface ConfReason {
+  rule: 1 | 2 | 3 | 4 | 5 | 6
+  text: string
+}
+export interface Confidence {
+  level: '높음' | '낮음'
+  reasons: ConfReason[]
+}
 
 export interface Factor {
   name: string
@@ -249,8 +275,17 @@ export interface A1Point {
   /** 설명의 기준값 (합성 기준 행에서의 평균 확률). 요인은 이 값에서 얼마나 올리고 내렸는지 */
   base?: number
   factors: Factor[]
-  /** 화면 표시 확신: 핵심 입력 (젖산, INR) 이 최근 24시간 안에 있는지 */
-  confidence?: { level: '높음' | '낮음'; why?: string }
+  /** 위험을 올린 근거 상위 2개 (그룹 Shapley 가 양수인 묶음) */
+  drivers?: Factor[]
+  /** 심각도 사다리: 같은 입력으로 2, 3, 4, 5배 모델의 24시간 안 확률 */
+  ladder?: { k: number; p: number }[]
+  /** 24시간 안 측정 없는 핵심 입력 (간 검사 4개, INR, 젖산, 크레아티닌 중) */
+  missingCore?: string[]
+  /** 빠진 핵심 입력을 개발 집단 기준 행 10개로 바꿔 넣은 예측의 10~90%. 빠진 것이 없으면 없음 */
+  interval?: { lo: number; hi: number }
+  /** 재면 구간이 가장 줄어드는 검사와 잰 뒤 예상 구간 */
+  nextTest?: { name: string; lo: number; hi: number }
+  confidence?: Confidence
 }
 
 export type EndState = 'rec-alive' | 'rec-dead' | 'norec-dead' | 'norec-alive'
@@ -261,6 +296,10 @@ export interface A2Output {
   /** ICU 사망 확률 (판정 불가 사건까지 넣어 학습한 별도 모델) */
   icuDeath: number
   factors: Factor[]
+  /** '이 중 하나일 가능성이 높음' 경로 (임시: 확률 큰 순으로 더해 0.9 까지, 보장 없음) */
+  pathSet: { keys: EndState[]; mass: number }
+  /** 규칙 6: 경로가 둘 이상이면 낮음 */
+  confidence: Confidence
 }
 
 /** 에이전트 4: 매시간, 예측 범위 6, 12, 18, 24시간의 10%, 50%, 90% 값 (원래 단위) */

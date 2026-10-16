@@ -7,6 +7,7 @@ import { Agent2 } from './Agent2'
 import { Agent3 } from './Agent3'
 import { Agent4 } from './Agent4'
 import { QnA } from './QnA'
+import { Notices } from './Notices'
 import type { RunState } from './state'
 import type { RagServer } from '../../data/rag'
 import type { WikiAt } from '../WikiModal'
@@ -52,6 +53,7 @@ export function AgentPanel(p: Props) {
       ) : (
         <>
           <AgentCards cs={cs} sim={sim} clock={clock} selected={p.selected} onSelect={p.onSelect} run={p.run} runState={p.state} qaCount={p.qa.length} />
+          <Notices cs={cs} sim={sim} clock={clock} />
           <div className="ad-title">
             <span className={p.selected === 'qa' ? 'agc-no ask' : 'agc-no'}>{p.selected === 'qa' ? '?' : p.selected}</span>
             {NAMES[p.selected]}

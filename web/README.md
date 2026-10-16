@@ -35,7 +35,7 @@ npm run wiki     # ../wiki_kb 가 바뀌면 public/wiki/kb.json 을 다시 만�
 | c2 | 윤○자 (SICU-05) | 쇼크 간 (복막염 수술 뒤 패혈성 쇼크) | 미회복 · ICU 사망 | 돎 |
 | c3 | 강○철 (MICU-03) | 기저 간질환형 (알코올 간경변, 정맥류 출혈) | 미회복 · 생존 | 응급실 검사로 입실 뒤 몇 시간 돎 |
 | c4 | 서○희 (MICU-09) | 담즙정체형 (총담관 결석, 담관염) | 회복 · 생존 | 응급실 검사로 입실 뒤 몇 시간 돎 |
-| c5 | 임○호 (SICU-08) | 관찰 중 새로 발생 (문합부 누출, 59시간 정상 뒤) | 판정 불가 · 생존 | 돎 (안정기 확신 낮음) |
+| c5 | 임○호 (SICU-08) | 관찰 중 새로 발생 (문합부 누출, 59시간 정상 뒤) | 판정 불가 · 생존 | 돎 |
 
 사례 파일은 `src/data/cases/` 에 있고, 공통 도구 (`kit.ts`: D0 기준 날짜, 검사 묶음, 투약, 매시간 활력징후) 로 만듭니다. 출력은 실제 모델이 낸 그대로이며 사례 설계 때 기대한 결과와 다를 수 있습니다.
 
@@ -53,6 +53,31 @@ npm run wiki     # ../wiki_kb 가 바뀌면 public/wiki/kb.json 을 다시 만�
 
 재생 중에는 첫 경보, 첫 이상, 5배 사건, 퇴실 시점에서 멈추고 그 에이전트를 보여 줍니다. 첫 이상 때는 원인 추정이 단계별로 실행되는 모습을 보여 줍니다.
 
+## 불확실성 표시 (불확실성 구현 명세 10/17)
+
+모델은 다시 학습하지 않고, 모델 패키지 출력 위에서 미리 고정한 규칙으로 계산합니다. 기준값은 모두 `src/lib/uncertainty.ts` 에 있습니다.
+
+| 에이전트 | 표시 | 계산 |
+|---|---|---|
+| 1 발생 예측 | 확신 (높음, 낮음) 과 이유, 결측 대체 구간, 줄이는 검사, 심각도 사다리, 위험을 올린 근거 상위 2개, 대상 아님 사유 | 아래 확신 규칙 1~5. 구간은 24시간 안에 재지 않은 핵심 입력의 변수 묶음을 기준 행 10개 (개발 집단 백분위) 로 바꿔 넣은 예측의 10~90%. 사다리는 같은 입력으로 `agent3_gbm_2x/3x/4x` (5배는 발생 예측 모델과 같은 모델) |
+| 2 종료 상태 | 경로 집합 ('이 중 하나일 가능성이 높음'), 확신 (규칙 6), 회복 판정에 필요한 검사 | 경로 집합은 임시 기준: 확률 큰 순으로 더해 0.9 까지 (보장 없음, conformal 기준을 받으면 바꿈) |
+| 3 원인 추정 | 범주마다 근거 자료 완성도 (있음 / 필요), 자료 상태 (있음, 측정 없음, 연결 안 됨, 자료에 없음, 이전 입원 없음), 판정 취약, 판단 보류 | 판정 취약은 규칙이 읽은 검사값 (와 48시간 혈색소 감소) 을 하나씩 ±10% 바꿔 규칙을 다시 돌렸을 때 0/1 이 바뀌는지 (`run_models.py`). 판단 보류는 원인 약이 둘 이상이거나 예방 목적 투여 (DILI), 저관류가 있지만 AST·ALT 가 3~5×ULN (저산소성 간염) |
+| 4 궤적 | 10~90% 띠, 최근 24시간 측정 없는 항목은 '예측 안 함', 띠의 포함률은 아직 확인 전이라는 안내 | 패키지 출력 그대로 |
+| 공통 | 보고 대기, 회복 판정에 필요한 검사, 사건 경계값, 병원 공지 | 채혈 ≤ 지금 < 보고인 검사 / 첫 이상 뒤 다시 재지 않은 사건 항목 (일부만 다시 쟀거나 24시간이 지났을 때) / 사건 값이 기준의 ±10% 안 / 연결부가 넘기지 않는 자료 (영상 판독문 등) |
+
+| 확신 규칙 | 기준 |
+|---|---|
+| 1 핵심 입력 결측 | 간 검사 4개, INR, 젖산, 크레아티닌 중 2개 이상이 24시간 안 측정 없음 |
+| 2 MIMIC 범위 밖 | 주요 변수 22개가 개발 집단 (조기 예측 대상 시간) 의 5~95% 밖. 기준은 모델 파일의 기준 행에서 읽음 (`meta.reference`) |
+| 3 입력 오류 보류 | 패키지 입력 오류 검사 (`data_errors.guard_lab`, 활력징후·나이 범위) 에서 보류된 값이 있음. 보류된 값도 모델 입력에서는 빼지 않음 |
+| 4 구간이 넓음 | 결측 대체 구간 폭 10%p 이상 (임시값) |
+| 5 사다리 뒤집힘 | 높은 배수 확률이 바로 아래 배수 확률보다 큼 (`LADDER_TOL` 0) |
+| 6 예후 경로 집합 | 경로가 둘 이상 (예후 카드에만) |
+
+- 검사 오차 범위 10% (`ERROR_RANGE`) 와 규칙 4 의 폭 기준은 확인 전 임시값입니다.
+- 예후와 원인 입력의 MIMIC 범위 기준 (첫 이상 시점 백분위) 은 아직 없어 '처음 보는 수준의 값' 안내는 하지 않습니다.
+- 과거력, 합토글로빈, NT-proBNP, 간염 혈청 검사 (`serology`) 는 연결부가 넘깁니다. 영상 판독문은 자료에 없어 병원 공지로 띄웁니다.
+
 ## 구성
 
 | 위치 | 내용 |
@@ -60,7 +85,8 @@ npm run wiki     # ../wiki_kb 가 바뀌면 public/wiki/kb.json 을 다시 만�
 | `src/types.ts` | 자료 형식. 사례 자료, 사건, 에이전트 출력 (`A1Point`, `A2Output`, `A4Forecast`, `AgentRun`, `CauseCall`, `ModelOutputs`), 질의응답 (`QaMsg`) |
 | `src/lib/events.ts` | 정의와 상수. 공개 시각, 사건 찾기, 정상 구간, 퇴실 때 판정, 기준 시각에 보이는 기록 |
 | `src/data/cases/` | 시연 사례 5명 (`c1.ts` ~ `c5.ts`) 과 공통 도구 `kit.ts`. 입실 전 응급실·병동 검사부터 퇴실까지 검사, 투약, 활력징후, 배양, 처치, 과거력 |
-| `src/data/runs.ts` | 사례마다 원인 추정 실행 기록: 패키지 원인 규칙 출력 + 근거 위키 지침 근거 + 도구 호출 단계 + 화면 표시 확신 |
+| `src/data/runs.ts` | 사례마다 원인 추정 실행 기록: 패키지 원인 규칙 출력 + 근거 위키 지침 근거 + 도구 호출 단계 + 근거 자료 완성도, 판정 취약, 판단 보류 |
+| `src/lib/uncertainty.ts` | 불확실성 규칙과 기준값: 확신 규칙 1~6, 경로 집합, 보고 대기, 사건 경계값, 근거 자료 완성도, 병원 공지 |
 | `src/data/modelrun.ts`, `src/data/model/` | 모델 패키지 적용 출력과 화면 형식 변환 |
 | `model-bridge/` | 사례 내보내기와 모델 실행 (`npm run models`) |
 | `src/data/causes.ts` | 원인 범주 10개 (임상의 선생님 기준) |
@@ -74,7 +100,7 @@ npm run wiki     # ../wiki_kb 가 바뀌면 public/wiki/kb.json 을 다시 만�
 | `scripts/build-wiki.mjs` | `wiki_kb` → `public/wiki/kb.json` |
 | `src/data/index.ts` | `getSim`: 사례 하나의 정시 목록, 사건, 에이전트별 실행 구간과 출력 |
 | `src/data/patients.ts` | 재원 환자 목록. `plannedScenario` 는 아직 만들지 않은 사례의 계획 (화면에 안 나옴) |
-| `src/components/agent/` | 에이전트 카드, 에이전트별 상세 화면, 원인 범주 목록 (`Result.tsx`), 질의응답 (`QnA.tsx`) |
+| `src/components/agent/` | 에이전트 카드, 공통 알림 (`Notices.tsx`), 에이전트별 상세 화면, 원인 범주 목록 (`Result.tsx`), 질의응답 (`QnA.tsx`) |
 | `src/components/WikiModal.tsx` | 근거 위키 보기 (절로 바로 가기, 위키 링크와 인용 따라가기) |
 | `src/assets/snuh_logo_white.svg`, `public/favicon.svg` | 상단 로고 (남색 바탕용) 와 브라우저 탭 아이콘. 원본은 `snuh_logo.svg` |
 | `src/styles.css` | 맨 위 `:root` 의 색과 글꼴 값만 바꾸면 전체 모양이 바뀝니다 |
@@ -84,8 +110,8 @@ npm run wiki     # ../wiki_kb 가 바뀌면 public/wiki/kb.json 을 다시 만�
 MIMIC 연구원의 모델 패키지 (`../kcd_model_package_*`, 공개 저장소에는 올리지 않음) 를 가상 사례에 다시 학습 없이 적용합니다.
 
 1. `model-bridge/export-case.ts`: 가상 사례를 패키지 검사 이름 (TBIL, CREAT 등) 과 공개 시각으로 내보냄
-2. `model-bridge/run_models.py`: 패키지의 중간 표 모양 (cohort, lab, context, events) 으로 바꾼 뒤 패키지 함수를 그대로 부름. 변수 계산 `build_features`, 설명 `explain_rows`, 궤적 `forecast_rows`, 원인 규칙 `rule_agent1`, 군집 `assign_clusters`
-3. 결과 `src/data/model/c01.json` (환자 식별 번호 없음) 을 `src/data/modelrun.ts` 가 화면 형식으로 바꿈
+2. `model-bridge/run_models.py`: 패키지의 중간 표 모양 (cohort, lab, context, events) 으로 바꾼 뒤 패키지 함수를 그대로 부름. 변수 계산 `build_features`, 설명 `explain_rows`, 궤적 `forecast_rows`, 원인 규칙 `rule_agent1`, 군집 `assign_clusters`, 입력 오류 검사 `guard_lab`. 불확실성 (사다리, 결측 대체 구간, 범위 밖 입력, 판정 취약) 도 여기서 계산
+3. 결과 `src/data/model/c1.json` ~ `c5.json` (환자 식별 번호 없음) 을 `src/data/modelrun.ts` 가 화면 형식으로 바꿈
 
 ```bash
 # MODEL_CARD.md 와 같은 버전이 필요합니다: python 3.11, scikit-learn 1.9.0, pandas 2.3.3, numpy 2.4.6
@@ -98,7 +124,7 @@ KCD_PYTHON=.venv-models/bin/python npm run models     # 패키지 위치가 다�
 - 과거력 (`history`) 은 이전 입원의 진단 코드로 넘기고, 패키지의 `history_flags` 가 6가지 과거력으로 바꿉니다.
 - 패키지에 경보 운영 기준이 없어 발생 예측 경보 30% 는 화면 설정입니다 (`src/lib/events.ts` 의 `A1_THRESHOLD`).
 - 임상 표현형 군집은 개발 때 불안정 (부트스트랩 ARI 0.75 미만) 이라 패키지 규칙대로 쓰지 않습니다.
-- 사건 정의의 2·3·4배 민감도 모델 (`agent3_gbm_2x` 등) 과 48시간 경로 모델 (`agent2_gbm`) 은 화면에 쓰지 않습니다.
+- 2·3·4배 모델 (`agent3_gbm_2x` 등) 은 심각도 사다리에만 씁니다. 48시간 경로 모델 (`agent2_gbm`) 은 화면에 쓰지 않습니다.
 - 모델 출력이 없는 새 사례는 에이전트 1, 4 에 대체 계산 (`standin.ts`) 을 씁니다.
 
 ## 질의응답과 근거 위키 (RAG)

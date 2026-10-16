@@ -31,6 +31,10 @@ const doc = {
   icuDeath: cs.outcome.icuDeath,
   // 이전 입원 (과거력): 모델 패키지의 history_flags 가 이번 ICU 입실 전에 퇴원한 입원의 코드만 씀
   history: (cs.history ?? []).map(h => ({ admitted: h.admitted, discharged: h.discharged, codes: h.codes.map(c => ({ code: c.code, version: c.version })) })),
+  // 간염 혈청 검사 (모델 패키지의 serology_record)
+  serology: (cs.serology ?? []).map(s => ({ label: s.label, value: s.value, time: s.time, available_at: s.reported })),
+  // 연결부가 모델에 넘기는 검사 (이름 대응표에 있는 것)
+  connected: [...new Set(Object.values(ANALYTE))].sort(),
   labs: cs.labs.map(r => ({
     id: r.id,
     code: r.code,

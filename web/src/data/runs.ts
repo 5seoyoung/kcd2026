@@ -1,6 +1,7 @@
 // 에이전트 3 (원인 추정) 실행 기록. 모델 패키지의 원인 규칙 (rule_agent.py, 학습 없음) 을 첫 이상 시점의
 // 48시간 스냅숏에 적용한 출력 (model-bridge → model/<사례>.json) 을 화면 형식으로 바꾸고, 범주마다 근거 위키의 지침 근거를 붙인다.
-// 점수와 인용 근거는 규칙 모델 출력 그대로이고, 여기서 바꾸지 않는다. 도구 호출 단계 문장, 의심 약제 표, 확신 표시는 자료에서 계산한다.
+// 점수와 인용 근거는 규칙 모델 출력 그대로이고, 여기서 바꾸지 않는다. 도구 호출 단계 문장, 의심 약제 표는 자료에서 계산하고,
+// 불확실성 (근거 자료 완성도, 판정 취약, 판단 보류) 은 불확실성 명세 (10/17) 규칙으로 계산한다 (lib/uncertainty.ts).
 import type { AgentRun, AgentStep, CaseData, CauseCall, Evidence, GuideLine, SuspectDrug } from '../types'
 import { CASES } from './cases'
 import { CAUSE_WIKI, causeName, EVIDENCE_MAP } from './causes'
@@ -8,6 +9,7 @@ import { CAUSE_NO, evidenceOf, model1Of, modelRun } from './modelrun'
 import { firstEvent, K_FIRST, reported, RULE_THRESHOLD, rRatio, sameDraw, uln } from '../lib/events'
 import { fmtNum } from '../lib/lab'
 import { addHours, hm, hoursBetween, isAfter, mdhm } from '../lib/time'
+import { completeness, fragileText } from '../lib/uncertainty'
 
 /** rule_agent.py 의 간독성 약 목록 (이름에 들어 있으면 해당) */
 const HEPATOTOXIC = ['acetaminophen', 'ceftriaxone', 'amoxicillin', 'clavulanate', 'piperacillin', 'isoniazid', 'rifampin',
@@ -112,6 +114,27 @@ function buildRun(cs: CaseData): AgentRun | undefined {
     .map(o => ({ o, given: o.admins.filter(a => a.status === 'given' && inWin(a.time)) }))
     .filter(d => d.given.length)
 
+  // 판단 보류 (범주별): 원인 약을 하나로 정할 수 없음, 예방 목적 투여, 저관류가 있지만 효소가 아직 규칙 기준 아래
+  const prophylaxis = hepato.filter(d => /예방/.test(d.o.dose))
+  const holdOf = (cause: number, score: number): string | undefined => {
+    if (cause === 4) {
+      const why = [
+        hepato.length >= 2 ? `원인 약을 하나로 정할 수 없음 (후보 ${hepato.length}개)` : '',
+        prophylaxis.length ? `예방 목적 투여일 수 있음 (${prophylaxis.map(d => `${d.o.drug} ${d.o.dose}`).join(', ')})` : '',
+      ].filter(Boolean)
+      return why.length ? why.join('. ') : undefined
+    }
+    const lowFlow = (mapMin !== null && mapMin < 65) || (lacMax !== null && lacMax >= 2) || pressors.length > 0
+    if (cause === 1 && score === 0 && amino >= 3 && amino < 5 && lowFlow) {
+      return `AST·ALT 최고 ${amino.toFixed(1)}×ULN (규칙 기준 5×ULN 미만) 이지만 저관류 근거가 있음. 12~24시간 뒤 재측정으로 판단`
+    }
+    return undefined
+  }
+  const con = run.meta.connected
+  const ctx = a3.inputs && con
+    ? { inp: a3.inputs, con, histKnown: Object.values(a3.history ?? {}).some(v => v !== null), pressor: pressors.length > 0, drugs: hepato.length }
+    : undefined
+
   const calls: CauseCall[] = Object.entries(a3.flags)
     .map(([code, f]) => {
       const cause = CAUSE_NO[code]
@@ -123,6 +146,9 @@ function buildRun(cs: CaseData): AgentRun | undefined {
         against: (f.assessable ? f.against : []).map<Evidence>(text => ({ text })),
         missing: f.assessable ? [] : f.against.map<Evidence>(text => ({ text })),
         guide: GUIDE[cause],
+        evidence: ctx && completeness(cause, ctx),
+        fragile: a3.fragile?.[code]?.map(fragileText),
+        hold: f.assessable ? holdOf(cause, f.score) : undefined,
       }
     })
     .sort((a, b) => a.cause - b.cause)
@@ -134,7 +160,6 @@ function buildRun(cs: CaseData): AgentRun | undefined {
   const supports = calls.flatMap(c => c.support).filter(s => !/이전 입원/.test(s.text))
   const matched = supports.filter(s => s.ref).length
   const m1 = model1Of(run)
-  const missingCore = /최근 측정 없음/.test(a3.uncertainty)
   const diliCited = new Set(a3.flags.dili?.support.map(s => (s.analyte_or_label ?? '').toLowerCase()) ?? [])
 
   const steps: AgentStep[] = [
@@ -200,16 +225,6 @@ function buildRun(cs: CaseData): AgentRun | undefined {
   if (score(2) === 0 && !cs.labs.some(r => r.code === 'BNP')) tests.push({ name: 'NT-proBNP, 심초음파 판독', why: '울혈성 간병증 규칙에 필요한 심부전 근거가 자료에 없음' })
   if ((score(8) ?? 0) > 0 && !cs.labs.some(r => r.code === 'HAPTO')) tests.push({ name: '합토글로빈, 말초혈액 도말', why: '용혈 점수 일부를 받았지만 합토글로빈이 없음' })
 
-  // 화면 표시 확신: 규칙의 판단 보류, 핵심 검사 누락, 함께 해당한 범주 수로 정함 (규칙 모델의 출력은 아님)
-  const confidence: AgentRun['confidence'] = a3.abstain
-    ? { level: '판단 보류', why: '규칙 점수가 약하거나 해당 범주가 없음' }
-    : missingCore
-      ? { level: '낮음', why: '첫 이상 때 ALT, ALP, 총빌리 중 최근 측정이 빠진 항목이 있음' }
-      : hits.length >= 2
-        ? { level: '낮음', why: `${hits.length}개 범주가 함께 해당 (과다 판정일 수 있음)` }
-        : hits[0] && hits[0].score! >= 2
-          ? { level: '높음', why: '한 범주만 해당하고 점수가 높으며 핵심 검사가 있음' }
-          : { level: '중간', why: '한 범주만 해당하지만 점수가 기준 근처' }
 
   return {
     caseId: cs.id, handwritten: false, ruleVersion: a3.model, llm: '없음 (규칙 기준 모델)',
@@ -223,7 +238,7 @@ function buildRun(cs: CaseData): AgentRun | undefined {
     suspectDrugs,
     recommendedTests: tests,
     verification: { total: supports.length, matched, issues: supports.filter(s => !s.ref).map(s => ({ text: s.text, detail: '원자료 위치를 찾지 못함' })) },
-    confidence,
+    abstain: a3.abstain ? '가장 높은 규칙 점수가 1.5 미만이거나 해당 범주가 없어 원인 규칙이 판단 보류' : undefined,
   }
 }
 

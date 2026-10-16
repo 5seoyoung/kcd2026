@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { AgentRun, CauseCall, Evidence, GuideLine, ModelOutputs, Ref } from '../../types'
+import type { AgentRun, CauseCall, Evidence, EvidenceItem, GuideLine, ModelOutputs, Ref } from '../../types'
 import type { WikiAt } from '../WikiModal'
 import { CAUSE_WIKI, causeName } from '../../data/causes'
 import { RULE_THRESHOLD } from '../../lib/events'
@@ -62,6 +62,24 @@ function EvList({ kind, label, items, onJump }: { kind: 'support' | 'against' | 
 
 const isHit = (c: CauseCall) => c.score !== null && c.score >= RULE_THRESHOLD
 
+const ST_CLASS: Record<EvidenceItem['status'], string> = { 있음: 'have', '측정 없음': 'miss', '연결 안 됨': 'off', '자료에 없음': 'off', '이전 입원 없음': 'miss' }
+
+/** 이 범주 판단에 필요한 자료와 상태 (근거 자료 완성도) */
+function NeedList({ c }: { c: CauseCall }) {
+  if (!c.evidence) return null
+  return (
+    <div className="ev-group need">
+      <div className="ev-label">판단에 필요한 자료 {c.evidence.have}/{c.evidence.need}</div>
+      {c.evidence.items.map(i => (
+        <div key={i.name} className="ev">
+          <span className={cls('need-st', ST_CLASS[i.status])}>{i.status}</span>
+          <span className="ev-text">{i.name}{i.detail && <span className="muted"> · {i.detail}</span>}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function CallRow({ c, open, onToggle, onJump, onWiki }: { c: CauseCall; open: boolean; onToggle: () => void; onJump: (r: Ref) => void; onWiki: (at: WikiAt) => void }) {
   const hit = isHit(c)
   const na = c.score === null
@@ -72,7 +90,13 @@ function CallRow({ c, open, onToggle, onJump, onWiki }: { c: CauseCall; open: bo
         <span className={cls('call-flag', hit ? 'hit' : na ? 'na' : 'no')}>{hit ? '해당' : na ? '판단 불가' : '–'}</span>
         <span className="call-name">
           <strong>{causeName(c.cause)}</strong>
-          <span className="code">범주 {c.cause}</span>
+          {c.evidence && c.evidence.need > 0 && (
+            <span className={cls('call-chip', c.evidence.have < c.evidence.need && 'part')} title="판단에 필요한 자료 가운데 있는 것">
+              자료 {c.evidence.have}/{c.evidence.need}
+            </span>
+          )}
+          {c.fragile && c.fragile.length > 0 && <span className="call-chip fragile" title="검사값 하나를 ±10% 바꾸면 판정이 바뀜">판정 취약</span>}
+          {c.hold && <span className="call-chip hold" title={c.hold}>판단 보류</span>}
         </span>
         <span className="call-bar" aria-hidden>
           {!na && <span className="call-fill" style={{ width: `${w}%` }} />}
@@ -85,10 +109,17 @@ function CallRow({ c, open, onToggle, onJump, onWiki }: { c: CauseCall; open: bo
         <div className="call-body">
           {c.temporal && <div className="temporal"><span className="tm-icon" aria-hidden>⏱</span>{c.temporal}</div>}
           {c.rule && <div className="call-rule"><b>규칙</b> {c.rule}</div>}
+          {c.hold && <div className="call-note hold"><b>판단 보류</b> {c.hold}</div>}
+          {c.fragile && c.fragile.length > 0 && (
+            <div className="call-note fragile">
+              <b>판정 취약</b> 검사 오차 범위 (±10%) 안에서 판정이 바뀝니다: {c.fragile.join('; ')}
+            </div>
+          )}
           <EvList kind="support" label="규칙이 찾은 근거" items={c.support} onJump={onJump} />
           <EvList kind="against" label="반대 근거와 한계" items={c.against} onJump={onJump} />
           <EvList kind="missing" label="판단하지 않는 이유" items={c.missing} onJump={onJump} />
-          {!c.support.length && !c.against.length && !c.missing.length && <div className="ev muted">규칙 조건에 맞는 기록 없음</div>}
+          <NeedList c={c} />
+          {!c.support.length && !c.against.length && !c.missing.length && <div className="ev-empty muted">규칙 조건에 맞는 기록 없음</div>}
           <GuideList items={c.guide} onWiki={onWiki} />
           <button className="link call-wiki" onClick={() => onWiki({ page: CAUSE_WIKI[c.cause].page })}>
             위키: {CAUSE_WIKI[c.cause].title} ›
@@ -112,24 +143,28 @@ export function Result({ run, models, onJump, onWiki }: Props) {
   })
   const v = run.verification
   const nHit = calls.filter(isHit).length
+  const nFragile = calls.filter(c => c.fragile?.length).length
+  const nHold = calls.filter(c => c.hold).length
 
   return (
     <div className="result">
       <div className="res-summary">
-        {run.confidence && (
-          <span className={cls('conf', `c-${run.confidence.level}`)} title={`${run.confidence.why}. 규칙 결과로 정한 화면 표시입니다`}>
-            확신 {run.confidence.level}
-          </span>
-        )}
+        {run.abstain && <span className="conf c-판단" title={run.abstain}>판단 보류</span>}
         <span className="res-tag">요약</span>
         {run.summary}
-        {run.confidence && <div className="conf-why">{run.confidence.why}</div>}
+        {(nFragile > 0 || nHold > 0) && (
+          <div className="conf-why">
+            {nFragile > 0 && <>판정 취약 {nFragile}개 범주 (검사값 ±10% 에서 판정이 바뀜). </>}
+            {nHold > 0 && <>판단 보류 {nHold}개 범주.</>}
+          </div>
+        )}
+        {run.abstain && <div className="conf-why">{run.abstain}</div>}
       </div>
 
       <section className="calls" aria-label="원인 범주 10개 규칙 판정">
         <div className="calls-head">
           <b>원인 범주 10개</b>
-          <span className="muted">{nHit}개 해당 · 막대는 규칙 점수 (0~{SCORE_MAX}), 세로선은 기준 {RULE_THRESHOLD.toFixed(1)}</span>
+          <span className="muted">{nHit}개 해당 · 막대는 규칙 점수 (0~{SCORE_MAX}), 세로선은 기준 {RULE_THRESHOLD.toFixed(1)} · 자료 a/b 는 판단에 필요한 자료 중 있는 것</span>
         </div>
         {calls.map(c => (
           <CallRow key={c.cause} c={c} open={open.has(c.cause)} onToggle={() => toggle(c.cause)} onJump={onJump} onWiki={onWiki} />

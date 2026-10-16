@@ -3,7 +3,9 @@
 
 패키지 함수를 그대로 부른다:
   변수 계산 build_features, 발생 예측 설명 explain_rows (그룹 Shapley, 합성 기준 행),
-  궤적 forecast_rows, 원인 규칙 rule_agent1 (snapshot_payload), 간 패턴 군집 assign_clusters.
+  궤적 forecast_rows, 원인 규칙 rule_agent1 (snapshot_payload), 간 패턴 군집 assign_clusters, 입력 오류 검사 guard_lab.
+불확실성 (모델은 그대로, 출력 위에서 계산): 2, 3, 4배 모델 사다리, 빠진 핵심 입력을 기준 행 10개로 바꿔 넣은 예측 구간,
+MIMIC 개발 집단 5~95% 범위 밖 입력, 원인 규칙의 입력값을 ±10% 바꿨을 때 0/1 이 바뀌는지.
 사례 자료를 패키지의 중간 표 (cohort, lab, context, events) 모양으로 바꾸는 부분만 여기서 한다.
 정의는 MODEL_CARD.md 를 따른다: 공개 시각 = max(채혈, 보고), 정상 = 세 항목 모두 24시간 안 측정이고 2배 미만.
 출력에는 환자 식별 번호가 없다 (안에서 쓰는 stay_id 는 1).
@@ -14,6 +16,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 import sys
@@ -25,6 +28,15 @@ import pandas as pd
 
 SID = 1
 VITALS = ["MAP", "HR", "RR", "SPO2", "TEMP_C"]
+# 확신 규칙 1 의 핵심 입력 (간 검사 4개, INR, 젖산, 크레아티닌). 빠지면 기준 행 값으로 바꿔 넣어 구간을 만든다
+CORE = ["ALT", "AST", "ALP", "TBIL", "INR", "LACTATE", "CREAT"]
+BLOCK = ("_latest", "_age_h", "_n24", "_delta24")
+# 확신 규칙 2 의 주요 변수 (기준: 발생 예측 모델의 기준 행 = 개발 집단 정상 구간 시각의 변수별 백분위, 첫 행 5%, 끝 행 95%)
+RANGE_FEATS = ["ALT_latest", "AST_latest", "ALP_latest", "TBIL_latest", "INR_latest", "ALBUMIN_latest", "LACTATE_latest",
+               "CREAT_latest", "BUN_latest", "NTPROBNP_latest", "age", "PLATELET_latest", "WBC_latest", "SODIUM_latest",
+               "GLUCOSE_latest", "BICARB_latest", "HEMOGLOBIN_latest", "MAP_latest", "HR_latest", "RR_latest", "SPO2_latest", "TEMP_C_latest"]
+LADDER = (2, 3, 4)  # 5배는 발생 예측 모델 (agent3_gbm, agent3_gbm_5x 와 같은 모델)
+ERR = 0.10  # 검사 오차 범위 (판정 취약)
 AGENT2_INPUTS = ["ALT_latest", "AST_latest", "ALP_latest", "TBIL_latest", "ALT_delta24", "LACTATE_latest", "MAP_latest",
                  "pressor_6h", "CREAT_latest", "INR_latest", "PLATELET_latest", "WBC_latest", "age", "hours_since_icu"]
 
@@ -40,6 +52,37 @@ def hourly(a: pd.Timestamp, b: pd.Timestamp):
 
 def fmt(t) -> str:
     return pd.Timestamp(t).strftime("%Y-%m-%d %H:%M")
+
+
+def imputation(predict, X: pd.DataFrame, bg: pd.DataFrame):
+    """빠진 핵심 입력 (24시간 안 측정 없음) 의 변수 묶음 (값, 측정 뒤 시간, 횟수, 24시간 변화) 을 기준 행 10개
+    (개발 집단 백분위) 로 바꿔 넣은 예측 10개의 10~90%. 빠진 항목이 여럿이면 같은 기준 행을 함께 넣는다.
+    항목마다 '그 항목을 재면' 남는 구간도 계산: 그 항목 값을 기준 행 10개에 걸쳐 두고, 남은 항목만 바꿔 넣은 구간의 평균."""
+    cols, n, out = list(X.columns), len(bg), []
+    for _, x in X.iterrows():
+        miss = [a for a in CORE if pd.isna(x[f"{a}_latest"])]
+        if not miss:
+            out.append((miss, None, []))
+            continue
+
+        def fill(idx):  # idx: 항목 -> 기준 행 번호 배열
+            N = len(next(iter(idx.values())))
+            R = pd.DataFrame(np.repeat(x.values[None, :], N, axis=0), columns=cols)
+            for a, ix in idx.items():
+                for s in BLOCK:
+                    R[a + s] = bg[a + s].values[ix]
+            return predict(R)
+
+        lo, hi = np.quantile(fill({a: np.arange(n) for a in miss}), [.1, .9])
+        nxt = []
+        for a in miss:
+            j, i = np.repeat(np.arange(n), n), np.tile(np.arange(n), n)
+            P = fill({b: (j if b == a else i) for b in miss}).reshape(n, n)  # 행: 그 항목 값, 열: 남은 항목
+            q = np.quantile(P, [.1, .9], axis=1)
+            nxt.append({"analyte": a, "lo": r4(q[0].mean()), "hi": r4(q[1].mean())})
+        nxt.sort(key=lambda d: d["hi"] - d["lo"])
+        out.append((miss, [r4(lo), r4(hi)], nxt))
+    return out
 
 
 def main(argv=None):
@@ -68,6 +111,7 @@ def run_case(C: dict, pkg: Path, card: str, M, out_path: Path):
     import sklearn
     from kcd_liver import develop as D
     from kcd_liver.pattern import _apply_params, assign_clusters, r_pattern
+    from kcd_liver.data_errors import AGE_RANGE, VITAL_RANGE, guard_lab
     from kcd_liver.rule_agent import CAUSE_FLAGS, VERSION as RULE_VERSION, rule_agent1
 
     T = pd.Timestamp
@@ -84,6 +128,9 @@ def run_case(C: dict, pkg: Path, card: str, M, out_path: Path):
            for v in C["vitals"] for k in VITALS if v.get(k) is not None]
     ctx += [{"stay_id": SID, "kind": m["kind"], "label": m["drug"], "value": m["value"], "unit": "", "charttime": T(m["time"]),
              "available_at": T(m["time"])} for m in C["meds"]]
+    # 간염 혈청 검사 (원인 규칙 9 가 입원 전체에서 읽음)
+    ctx += [{"stay_id": SID, "kind": "serology_record", "label": s["label"], "value": s["value"], "unit": "", "charttime": T(s["time"]),
+             "available_at": T(s.get("available_at") or s["time"])} for s in C.get("serology") or []]
     context = pd.DataFrame(ctx)
     # 과거력: 이번 ICU 입실 전에 퇴원한 이전 입원의 진단 코드 (없으면 결측, 0 이 아님)
     prev = C.get("history") or []
@@ -120,22 +167,50 @@ def run_case(C: dict, pkg: Path, card: str, M, out_path: Path):
     elig = fresh & below
     any_lab = np.logical_or.reduce([E[f"{an}_charttime"].notna().values for an in D.TRIGGERS])
     ok = rows[elig].reset_index(drop=True)
+    bg = b1["background"].reset_index(drop=True)
+    ref = {f: (float(bg[f].min()), float(bg[f].max())) for f in RANGE_FEATS}  # 기준 행 첫 행 5%, 끝 행 95%
+    # 입력 오류 검사 (패키지 data_errors): 보류된 검사값, 생리적으로 불가능한 활력징후와 나이
+    _, held = guard_lab(lab)
+    vit = context[context.kind.eq("vital")].assign(v=lambda d: pd.to_numeric(d.value, errors="coerce"))
+
+    def guard_at(t):
+        g = [{"var": q.analyte, "value": r4(q.value), "at": fmt(q.charttime), "reason": q.reason}
+             for q in held[(held.available_at <= t) & (held.charttime >= t - pd.Timedelta(hours=24))].itertuples()]
+        w = vit[(vit.available_at <= t) & (vit.charttime >= t - pd.Timedelta(hours=6))]
+        g += [{"var": q.label, "value": r4(q.v), "at": fmt(q.charttime), "reason": "range"} for q in w.itertuples()
+              if q.label in VITAL_RANGE and not VITAL_RANGE[q.label][0] <= q.v <= VITAL_RANGE[q.label][1]]
+        if not AGE_RANGE[0] <= float(C["age"]) <= AGE_RANGE[1]:
+            g.append({"var": "age", "value": float(C["age"]), "at": None, "reason": "range"})
+        return g
+
     pred = {}
     if len(ok):
         X1 = D.build_features(ok, lab, context, cohort, hist).reindex(columns=b1["features"]).astype(float)
         p1 = b1["model"].predict_proba(X1)[:, 1]
         ex = D.explain_rows(b1, X1)
-        pred = {fmt(t): (p, e) for t, p, e in zip(ok.t, p1, ex)}
+        # 심각도 사다리: 같은 입력으로 2, 3, 4배 모델 (5배는 위 확률)
+        lad = {}
+        for k in LADDER:
+            m = M(f"agent3_gbm_{k}x.joblib")
+            lad[k] = m["model"].predict_proba(X1.reindex(columns=m["features"]).astype(float))[:, 1]
+        imp = imputation(lambda A: b1["model"].predict_proba(A[b1["features"]].astype(float))[:, 1], X1, bg)
+        for j, t in enumerate(ok.t):
+            miss, iv, nxt = imp[j]
+            x = X1.iloc[j]
+            pred[fmt(t)] = {
+                "p": r4(p1[j]), "base": r4(ex[j]["base"]),
+                "groups": [{"group": g["group"], "label": g["label"], "value": r4(g["value"])} for g in ex[j]["groups"]],
+                "ladder": {**{str(k): r4(lad[k][j]) for k in LADDER}, "5": r4(p1[j])},
+                "missing_core": miss, "interval": iv, "next_test": nxt,
+                "out_of_range": [{"var": f.removesuffix("_latest"), "value": r4(x[f])} for f in RANGE_FEATS
+                                 if pd.notna(x[f]) and not ref[f][0] <= x[f] <= ref[f][1]],
+                "guard": guard_at(t),
+            }
     for i, t in enumerate(rows.t):
         if not any_lab[i]:
             continue  # 첫 간 검사 결과 전에는 돌지 않음
         key = fmt(t)
-        if key in pred:
-            p, e = pred[key]
-            out["a1"].append({"time": key, "eligible": True, "p": r4(p), "base": r4(e["base"]),
-                              "groups": [{"group": g["group"], "label": g["label"], "value": r4(g["value"])} for g in e["groups"]]})
-        else:
-            out["a1"].append({"time": key, "eligible": False})
+        out["a1"].append({"time": key, "eligible": True, **pred[key]} if key in pred else {"time": key, "eligible": False})
 
     # ---- 4 궤적: 매시간, 상태와 무관 (그 시각 24시간 안에 잰 값이 있는 항목만)
     b4 = M("trajectory_qgbm.joblib")
@@ -164,6 +239,37 @@ def run_case(C: dict, pkg: Path, card: str, M, out_path: Path):
         out["a3"] = {"t0": fmt(t0), "model": RULE_VERSION, "pattern": r["pattern"], "abstain": r["abstain"], "history": {k: (None if pd.isna(v) else bool(v)) for k, v in hist_row.items()},
                      "uncertainty": r["uncertainty"], "flags": {c: r["flags"][c] for c in CAUSE_FLAGS},
                      "snapshot": {"labs": len(payload["labs"]), "context": len(payload["context"])}}
+        # 규칙이 읽은 입력 (근거 완성도 계산용): 스냅숏 속 검사, 활력징후 종류, 기록 종류, 혈색소 감소, 혈청 검사 수
+        ex0 = payload.get("exposures") or {}
+        out["a3"]["inputs"] = {
+            "labs": {l["analyte"]: {"value": r4(l["value"]), "ratio": r4(l["ratio"]), "at": fmt(l["measured_at"])} for l in payload["labs"]},
+            "vitals": sorted({c["label"] for c in payload["context"] if c["kind"] == "vital"}),
+            "records": sorted({c["kind"] for c in payload["context"] if c["kind"] != "vital"}),
+            "hb_drop": r4(payload.get("hemoglobin_drop_48h")), "serology": len(ex0.get("serology", [])), "pn_days": ex0.get("pn_days"),
+        }
+
+        # 판정 취약: 규칙이 읽은 검사값 (와 48시간 혈색소 감소) 을 하나씩 검사 오차 범위 (±10%) 만큼 바꿔 다시 돌렸을 때 0/1 이 바뀌는 범주
+        fragile = {}
+
+        def recheck(P, name, f, v):
+            rr_ = rule_agent1(P)
+            for c in CAUSE_FLAGS:
+                if rr_["flags"][c]["present"] != r["flags"][c]["present"]:
+                    fragile.setdefault(c, []).append({"input": name, "change": f"{f - 1:+.0%}", "value": r4(v), "to": rr_["flags"][c]["present"],
+                                                      "score": rr_["flags"][c]["score"]})
+
+        for i, l in enumerate(payload["labs"]):
+            for f in (1 - ERR, 1 + ERR):
+                P = copy.deepcopy(payload)
+                P["labs"][i]["value"] = l["value"] * f
+                if l["ratio"] is not None:
+                    P["labs"][i]["ratio"] = l["ratio"] * f
+                recheck(P, l["analyte"], f, l["value"])
+        if payload.get("hemoglobin_drop_48h") is not None:
+            for f in (1 - ERR, 1 + ERR):
+                recheck({**payload, "hemoglobin_drop_48h": payload["hemoglobin_drop_48h"] * f}, "HEMOGLOBIN_DROP", f, payload["hemoglobin_drop_48h"])
+        out["a3"]["fragile"] = fragile
+        out["a3"]["error_range"] = ERR
 
         # ---- 보조: 간 패턴 군집 (원인 판정에 쓰지 않음). 임상 표현형 군집은 개발 때 불안정 → 쓰지 않음
         cm = M("cluster_models.joblib")
@@ -198,7 +304,12 @@ def run_case(C: dict, pkg: Path, card: str, M, out_path: Path):
     out["meta"] = {"package": pkg.name, "code_version": code.group(1) if code else None, "trained_on": b1.get("trained_on"),
                    "built_at": b1.get("built_at"), "sklearn": sklearn.__version__, "python": sys.version.split()[0],
                    "rule_model": RULE_VERSION, "agent1_internal": {"auroc": r4(float(auroc.group(1))), "auprc": r4(float(auroc.group(2)))} if auroc else None,
-                   "case": C["caseId"], "note": "가상 사례에 고정 모델을 적용한 출력. 환자 식별 번호 없음."}
+                   "case": C["caseId"], "note": "가상 사례에 고정 모델을 적용한 출력. 환자 식별 번호 없음.",
+                   # 확신 규칙 2 의 기준 (발생 예측 모델 기준 행의 5%, 95%. 개발 집단 정상 구간 시각의 변수별 백분위)
+                   "reference": {f.removesuffix("_latest"): [r4(lo), r4(hi)] for f, (lo, hi) in ref.items()},
+                   # 연결부가 모델에 넘기는 자료 (넘기지 않는 것은 화면에서 '연결 안 됨')
+                   "connected": {"labs": C.get("connected") or [], "history": True, "serology": True,
+                                 "infusion": True, "emar": True, "imaging_report": False}}
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     n1 = sum(1 for x in out["a1"] if x["eligible"])
