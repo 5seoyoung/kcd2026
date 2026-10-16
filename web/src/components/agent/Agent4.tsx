@@ -1,10 +1,10 @@
 import { useState, type KeyboardEvent, type MouseEvent } from 'react'
 import type { A4Forecast, CaseData, LiverEvent } from '../../types'
 import type { Sim } from '../../data'
-import { forecastAt } from '../../data/standin'
+import { HORIZONS } from '../../data/standin'
 import { itemOf, seriesAt, uln } from '../../lib/events'
 import { fmtNum } from '../../lib/lab'
-import { addHours, daysBetween, floorHour, hourly, isAfter, md, mdhm, toMs } from '../../lib/time'
+import { addHours, daysBetween, floorHour, isAfter, md, mdhm, toMs } from '../../lib/time'
 import { useWidth } from '../../lib/ui'
 import { a4Now, crossing } from './state'
 
@@ -16,7 +16,6 @@ interface Props {
 }
 
 const short = (name: string) => name.split(' (')[0]
-const HORIZONS = [6, 12, 24]
 
 export function Agent4({ cs, sim, clock, events }: Props) {
   const { at, ended, forecasts } = a4Now(cs, sim, clock)
@@ -32,7 +31,7 @@ export function Agent4({ cs, sim, clock, events }: Props) {
         </span>
         <span className="spacer" />
         <span className="legend">
-          <span className="lg measured" />측정 <span className="lg forecast" />예측 <span className="lg band" />예측 범위
+          <span className="lg measured" />측정 <span className="lg forecast" />예측 중앙값 <span className="lg band" />10~90%
         </span>
       </div>
       <TrajChart cs={cs} at={at} forecasts={forecasts} events={events} />
@@ -48,19 +47,16 @@ export function Agent4({ cs, sim, clock, events }: Props) {
         <tbody>
           {forecasts.map(f => {
             const it = itemOf(cs, f.code)
-            const k = crossing(cs, f, at)
+            const k = crossing(cs, f)
             return (
               <tr key={f.code}>
                 <td><b>{short(it.name)}</b></td>
                 <td>{fmtNum(f.last.value, it.dp)} <span className="mono muted">{mdhm(f.last.time)}</span></td>
-                {HORIZONS.map(h => {
-                  const p = forecastAt(f, addHours(at, h))
-                  return (
-                    <td key={h} className="r" title={`범위 ${fmtNum(p.lo, it.dp)}~${fmtNum(p.hi, it.dp)}`}>
-                      {fmtNum(p.v, it.dp)}
-                    </td>
-                  )
-                })}
+                {f.points.map(p => (
+                  <td key={p.h} className="r" title={`10~90% ${fmtNum(p.lo, it.dp)}~${fmtNum(p.hi, it.dp)}`}>
+                    {fmtNum(p.v, it.dp)}
+                  </td>
+                ))}
                 <td>{k ? <span className="cross">{k}배 넘음</span> : <span className="muted">–</span>}</td>
               </tr>
             )
@@ -68,7 +64,7 @@ export function Agent4({ cs, sim, clock, events }: Props) {
         </tbody>
       </table>
       <p className="note">
-        실선은 측정값, 점선은 예측, 띠는 예측 범위입니다. 간 검사는 하루 1~2번이라 실제로는 다음 채혈 값을 예측하는 셈입니다. 칸에 마우스를 올리면 예측 범위가 보입니다.
+        실선은 측정값, 점선은 6, 12, 18, 24시간 뒤 예측 중앙값, 띠는 10~90% 범위입니다. 간 검사는 하루 1~2번이라 실제로는 다음 채혈 값을 예측하는 셈입니다. 칸에 마우스를 올리면 범위가 보입니다.
       </p>
     </div>
   )
@@ -80,7 +76,6 @@ const LANE_H = 62
 const GAP = 14
 const TOP = 12
 const AXIS = 16
-const HOUR = 3_600_000
 
 interface ChartProps {
   cs: CaseData
@@ -113,37 +108,40 @@ function TrajChart({ cs, at, forecasts, events }: ChartProps) {
     const all = seriesAt(cs, f.code, at)
     const firstIn = all.findIndex(r => !isAfter(from, r.charttime))
     const measured = firstIn === -1 ? all.slice(-1) : all.slice(Math.max(0, firstIn - 1))
-    const pts = f.points.filter(p => !isAfter(p.time, to))
-    const peak = Math.max(...measured.filter(r => !isAfter(from, r.charttime)).map(r => r.value), ...pts.map(p => p.hi), 2 * u)
+    const pts = f.points
+    // 축은 측정값과 예측 중앙값에 맞춤 (범위 띠는 위에서 잘릴 수 있음)
+    const peak = Math.max(...measured.filter(r => !isAfter(from, r.charttime)).map(r => r.value), ...pts.map(p => p.v), 2 * u)
     const yMax = niceCeil(peak * 1.08)
     const y = laneY(i)
     const sy = (v: number) => y + LANE_H - (Math.min(v, yMax) / yMax) * LANE_H
     return { f, it, u, measured, pts, yMax, y, sy }
   })
 
-  const ticks = hourly(floorHour(from), to).filter(t => !isAfter(from, t))
+  // 마우스가 멈출 수 있는 시각: 측정한 시각 (정시로 내림) 과 예측 범위 6, 12, 18, 24시간
+  const stops = [...new Set([
+    ...lanes.flatMap(l => l.measured.filter(r => !isAfter(from, r.charttime)).map(r => floorHour(r.charttime))),
+    ...HORIZONS.map(h => addHours(at, h)),
+  ])].sort((a, b) => toMs(a) - toMs(b))
   const pick = (e: MouseEvent<SVGRectElement>) => {
     const box = e.currentTarget.getBoundingClientRect()
     const ms = x0 + ((e.clientX - box.left) / (box.width || 1)) * (x1 - x0)
-    const i = Math.round((ms - toMs(ticks[0])) / HOUR)
-    setHover(ticks[Math.max(0, Math.min(ticks.length - 1, i))])
+    setHover(stops.reduce((a, b) => (Math.abs(toMs(b) - ms) < Math.abs(toMs(a) - ms) ? b : a)))
   }
   const onKey = (e: KeyboardEvent) => {
-    const i = hover ? ticks.indexOf(hover) : ticks.indexOf(floorHour(at))
-    if (e.key === 'ArrowRight') setHover(ticks[Math.min(ticks.length - 1, i + 1)])
-    if (e.key === 'ArrowLeft') setHover(ticks[Math.max(0, i - 1)])
+    const i = hover ? stops.indexOf(hover) : stops.length
+    if (e.key === 'ArrowRight') setHover(stops[Math.min(stops.length - 1, i + 1)])
+    if (e.key === 'ArrowLeft') setHover(stops[Math.max(0, i - 1)])
   }
 
-  // 마우스 위치의 값: 그 시간에 잰 값이 있으면 측정, 마지막 측정 뒤면 예측
+  // 마우스 위치의 값: 그 시간에 잰 값이 있으면 측정, 예측 범위 시각이면 예측
   const tip = hover
     ? lanes.map(l => {
         const m = l.measured.find(r => floorHour(r.charttime) === hover)
         if (m) return { l, kind: '측정' as const, text: fmtNum(m.value, l.it.dp) }
-        if (!isAfter(l.f.last.time, hover)) return { l, kind: '–' as const, text: '' }
         const p = l.pts.find(q => q.time === hover)
         return p
-          ? { l, kind: '예측' as const, text: `${fmtNum(p.v, l.it.dp)} (${fmtNum(p.lo, l.it.dp)}~${fmtNum(p.hi, l.it.dp)})` }
-          : { l, kind: '–' as const, text: '' }
+          ? { l, kind: `+${p.h}시간` as string, text: `${fmtNum(p.v, l.it.dp)} (${fmtNum(p.lo, l.it.dp)}~${fmtNum(p.hi, l.it.dp)})` }
+          : { l, kind: '–' as string, text: '' }
       })
     : null
   const hx = hover ? sx(hover) : 0
@@ -165,8 +163,10 @@ function TrajChart({ cs, at, forecasts, events }: ChartProps) {
         {lanes.map(l => {
           const { y, sy } = l
           const k5 = 5 * l.u
-          const band = [...l.pts.map(p => `${sx(p.time)},${sy(p.hi)}`), ...[...l.pts].reverse().map(p => `${sx(p.time)},${sy(p.lo)}`)].join(' ')
-          const fpath = l.pts.map((p, j) => `${j ? 'L' : 'M'}${sx(p.time)},${sy(p.v)}`).join(' ')
+          // 예측선과 범위는 마지막 측정값에서 시작
+          const o = { x: sx(l.f.last.time), y: sy(l.f.last.value) }
+          const band = [`${o.x},${o.y}`, ...l.pts.map(p => `${sx(p.time)},${sy(p.hi)}`), ...[...l.pts].reverse().map(p => `${sx(p.time)},${sy(p.lo)}`)].join(' ')
+          const fpath = `M${o.x},${o.y} ` + l.pts.map(p => `L${sx(p.time)},${sy(p.v)}`).join(' ')
           const mpath = l.measured.map((r, j) => `${j ? 'L' : 'M'}${sx(r.charttime)},${sy(r.value)}`).join(' ')
           const end = l.pts.at(-1)!
           return (
@@ -194,6 +194,7 @@ function TrajChart({ cs, at, forecasts, events }: ChartProps) {
                 {l.measured.map(r => (
                   <circle key={r.id} cx={sx(r.charttime)} cy={sy(r.value)} r={3} className={r.value >= k5 ? 'tj-dot hi' : 'tj-dot'} />
                 ))}
+                {l.pts.map(p => <circle key={p.h} cx={sx(p.time)} cy={sy(p.v)} r={2.5} className="tj-fdot" />)}
               </g>
               <text x={W - PAD_R + 4} y={sy(end.v) + 4} className="tj-end">{fmtNum(end.v, l.it.dp)}</text>
             </g>
@@ -225,9 +226,9 @@ function TrajChart({ cs, at, forecasts, events }: ChartProps) {
   )
 }
 
-/** 1, 2, 2.5, 5 x 10^n 단위로 올림 */
+/** 1, 1.5, 2, 2.5, 5 x 10^n 단위로 올림 */
 function niceCeil(v: number): number {
   const p = Math.pow(10, Math.floor(Math.log10(v)))
-  for (const m of [1, 2, 2.5, 5, 10]) if (v <= m * p) return m * p
+  for (const m of [1, 1.5, 2, 2.5, 5, 10]) if (v <= m * p) return m * p
   return 10 * p
 }

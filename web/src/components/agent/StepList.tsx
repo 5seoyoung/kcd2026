@@ -43,7 +43,7 @@ export function StepList({ steps, step, running, speed, onSpeed, onSkip }: Props
                 <div className="st-body">
                   <div className="st-title">
                     <code>{s.tool}</code> {s.title}
-                    {s.tool === 'query_model1' && <span className="b-only">B 조건만</span>}
+                    {s.tool === 'query_model1' && <span className="b-only">보조 · 판정에 안 씀</span>}
                   </div>
                   {state === 'done' && <div className="st-sum">{s.summary}</div>}
                   {state === 'done' && s.details?.map(d => <div key={d} className="st-detail">{d}</div>)}

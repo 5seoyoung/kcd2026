@@ -1,14 +1,39 @@
-import type { AgentRun, Candidate, Condition, Evidence, ModelOutputs, Ref } from '../../types'
-import { causeName } from '../../data/causes'
+import { useState } from 'react'
+import type { AgentRun, CauseCall, Evidence, GuideLine, ModelOutputs, Ref } from '../../types'
+import type { WikiAt } from '../WikiModal'
+import { CAUSE_WIKI, causeName } from '../../data/causes'
+import { RULE_THRESHOLD } from '../../lib/events'
 import { cls } from '../../lib/ui'
 
 interface Props {
   run: AgentRun
-  other?: AgentRun
-  condition: Condition
   models?: ModelOutputs
   onJump: (ref: Ref) => void
+  onWiki: (at: WikiAt) => void
 }
+
+/** 근거 위키에서 가져온 진단 기준과 근거 공백 */
+function GuideList({ items, onWiki }: { items: GuideLine[]; onWiki: (at: WikiAt) => void }) {
+  if (!items.length) return null
+  return (
+    <div className="ev-group guide">
+      <div className="ev-label">지침 근거 · 근거 위키</div>
+      {items.map(g => {
+        const isGap = g.cite === '근거 공백'
+        return (
+          <button key={g.text} className={cls('ev jump', isGap && 'gap')} onClick={() => onWiki({ page: g.page, heading: g.heading })}>
+            <span className="ev-mark" aria-hidden>{isGap ? '∅' : '§'}</span>
+            <span className="ev-text">{g.text} <span className="ev-cite">{g.cite}</span></span>
+            <span className="ev-go">위키 ›</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** 점수 막대의 오른쪽 끝 */
+const SCORE_MAX = 3
 
 function EvList({ kind, label, items, onJump }: { kind: 'support' | 'against' | 'missing'; label: string; items: Evidence[]; onJump: (r: Ref) => void }) {
   if (!items.length) return null
@@ -35,34 +60,57 @@ function EvList({ kind, label, items, onJump }: { kind: 'support' | 'against' | 
   )
 }
 
-function CandidateCard({ c, rank, change, onJump }: { c: Candidate; rank: number; change: number; onJump: (r: Ref) => void }) {
+const isHit = (c: CauseCall) => c.score !== null && c.score >= RULE_THRESHOLD
+
+function CallRow({ c, open, onToggle, onJump, onWiki }: { c: CauseCall; open: boolean; onToggle: () => void; onJump: (r: Ref) => void; onWiki: (at: WikiAt) => void }) {
+  const hit = isHit(c)
+  const na = c.score === null
+  const w = na ? 0 : (Math.min(c.score!, SCORE_MAX) / SCORE_MAX) * 100
   return (
-    <article className={`cand r${rank}`}>
-      <header>
-        <span className="rank">{rank}</span>
-        <strong>{causeName(c.cause)}</strong>
-        <span className="code">범주 {c.cause}</span>
-        {change !== 0 && <span className="chg">{change > 0 ? `▲${change}` : `▼${-change}`} A 대비</span>}
-        <span className="spacer" />
-        <span className={`unc u${c.uncertainty}`}>불확실성 {c.uncertainty}</span>
-      </header>
-      {c.temporal && <div className="temporal"><span className="tm-icon" aria-hidden>⏱</span>{c.temporal}</div>}
-      <EvList kind="support" label="지지 근거" items={c.support} onJump={onJump} />
-      <EvList kind="against" label="반대 근거" items={c.against} onJump={onJump} />
-      <EvList kind="missing" label="누락 근거" items={c.missing} onJump={onJump} />
+    <article className={cls('call', hit && 'hit', na && 'na', open && 'open')}>
+      <button className="call-head" onClick={onToggle} aria-expanded={open}>
+        <span className={cls('call-flag', hit ? 'hit' : na ? 'na' : 'no')}>{hit ? '해당' : na ? '판단 불가' : '–'}</span>
+        <span className="call-name">
+          <strong>{causeName(c.cause)}</strong>
+          <span className="code">범주 {c.cause}</span>
+        </span>
+        <span className="call-bar" aria-hidden>
+          {!na && <span className="call-fill" style={{ width: `${w}%` }} />}
+          <span className="call-thr" style={{ left: `${(RULE_THRESHOLD / SCORE_MAX) * 100}%` }} />
+        </span>
+        <span className="call-score">{na ? '–' : c.score!.toFixed(1)}</span>
+        <span className="call-caret" aria-hidden>{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <div className="call-body">
+          {c.temporal && <div className="temporal"><span className="tm-icon" aria-hidden>⏱</span>{c.temporal}</div>}
+          <EvList kind="support" label="지지 근거" items={c.support} onJump={onJump} />
+          <EvList kind="against" label="반대 근거" items={c.against} onJump={onJump} />
+          <EvList kind="missing" label="없는 근거" items={c.missing} onJump={onJump} />
+          {!c.support.length && !c.against.length && !c.missing.length && <div className="ev muted">이 환자 기록에서 찾은 근거 없음</div>}
+          <GuideList items={c.guide} onWiki={onWiki} />
+          <button className="link call-wiki" onClick={() => onWiki({ page: CAUSE_WIKI[c.cause].page })}>
+            위키: {CAUSE_WIKI[c.cause].title} ›
+          </button>
+        </div>
+      )}
     </article>
   )
 }
 
-export function Result({ run, other, condition, models, onJump }: Props) {
-  const a = condition === 'A' ? run : other
-  const b = condition === 'B' ? run : other
-  const changeOf = (cause: number, i: number) => {
-    if (condition !== 'B' || !a) return 0
-    const j = a.candidates.findIndex(c => c.cause === cause)
-    return j === -1 ? 0 : j - i
-  }
+export function Result({ run, models, onJump, onWiki }: Props) {
+  // 해당 범주 (점수 높은 순) → 해당 없음 (점수 높은 순) → 판단 불가
+  const rank = (c: CauseCall) => (c.score === null ? -1 : c.score)
+  const calls = [...run.calls].sort((a, b) => Number(isHit(b)) - Number(isHit(a)) || rank(b) - rank(a))
+  const [open, setOpen] = useState<Set<number>>(() => new Set(calls.filter(isHit).map(c => c.cause)))
+  const toggle = (id: number) => setOpen(s => {
+    const n = new Set(s)
+    if (n.has(id)) n.delete(id)
+    else n.add(id)
+    return n
+  })
   const v = run.verification
+  const nHit = calls.filter(isHit).length
 
   return (
     <div className="result">
@@ -71,34 +119,18 @@ export function Result({ run, other, condition, models, onJump }: Props) {
         {run.summary}
       </div>
 
-      {run.candidates.map((c, i) => (
-        <CandidateCard key={c.cause} c={c} rank={i + 1} change={changeOf(c.cause, i)} onJump={onJump} />
-      ))}
-
-      {a && b && (
-        <section className="sub-card">
-          <h4>A 와 B 순위 비교</h4>
-          <table className="mini-grid">
-            <thead><tr><th>순위</th><th>A 기본</th><th>B 군집 정보 추가</th></tr></thead>
-            <tbody>
-              {[0, 1, 2].map(i => {
-                const ca = a.candidates[i]
-                const cb = b.candidates[i]
-                return (
-                  <tr key={i} className={cls(ca?.cause !== cb?.cause && 'diff')}>
-                    <td>{i + 1}</td>
-                    <td>{ca ? causeName(ca.cause) : '–'}</td>
-                    <td>{cb ? causeName(cb.cause) : '–'}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </section>
-      )}
+      <section className="calls" aria-label="원인 범주 10개 규칙 판정">
+        <div className="calls-head">
+          <b>원인 범주 10개</b>
+          <span className="muted">{nHit}개 해당 · 막대는 규칙 점수 (0~{SCORE_MAX}), 세로선은 기준 {RULE_THRESHOLD.toFixed(1)}</span>
+        </div>
+        {calls.map(c => (
+          <CallRow key={c.cause} c={c} open={open.has(c.cause)} onToggle={() => toggle(c.cause)} onJump={onJump} onWiki={onWiki} />
+        ))}
+      </section>
 
       <section className="sub-card">
-        <h4>의심 약제 순위 <span className="h4-sub">DILI 보조 출력 · 잠복기 → 간독성 → 패턴</span></h4>
+        <h4>의심 약제 <span className="h4-sub">DILI 근거 보조 · 잠복기 → 간독성 → 패턴</span></h4>
         <table className="mini-grid">
           <thead><tr><th>약</th><th>잠복기</th><th>간독성</th><th>패턴</th></tr></thead>
           <tbody>
@@ -127,10 +159,10 @@ export function Result({ run, other, condition, models, onJump }: Props) {
         </span>
       </section>
 
-      {condition === 'B' && models && (
+      {models && (
         <section className="sub-card model">
           <h4>
-            간 검사 이상 패턴 <span className="h4-sub">모델 1 · B 조건에만 제공</span>
+            간 검사 이상 패턴 <span className="h4-sub">모델 1 · 보조 정보, 원인 판정에 쓰지 않음</span>
           </h4>
           <div className="m1">
             <span className="m1-cluster">{models.model1.cluster}</span>
@@ -145,7 +177,7 @@ export function Result({ run, other, condition, models, onJump }: Props) {
       )}
 
       <p className="disclaimer">
-        원인 후보는 확진이 아닙니다. 치료나 약 중단 결정은 출력하지 않습니다. 종료 상태 예측 (에이전트 2) 은 원인 판단에 쓰지 않습니다.
+        해당 범주는 확진이 아니고, 여러 범주가 함께 해당할 수 있습니다. 치료나 약 중단 결정은 출력하지 않습니다. 종료 상태 예측과 군집 정보는 원인 판정에 쓰지 않습니다.
       </p>
     </div>
   )

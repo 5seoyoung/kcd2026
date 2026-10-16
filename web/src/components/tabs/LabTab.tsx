@@ -18,7 +18,7 @@ export function LabTab({ cs, clock, events, hl }: Props) {
   const visible = labsAt(cs, clock)
   const cols = [...new Set(visible.map(r => r.charttime))].sort((a, b) => toMs(a) - toMs(b))
   const at = new Map(visible.map(r => [`${r.code}|${r.charttime}`, r]))
-  const evAt = new Map(events.map(e => [e.t0, e]))
+  const evAt = new Map(events.map(e => [e.drawn, e]))
   const triggers = new Set(events.map(e => e.result.id))
   const groups = [...new Set(cs.labItems.map(i => i.group))]
 
@@ -46,7 +46,7 @@ export function LabTab({ cs, clock, events, hl }: Props) {
               {cols.map(c => {
                 const ev = evAt.get(c)
                 return (
-                  <th key={c} className={cls('tc', ev && 't0col')} title={ev ? `${ev.k}배 사건 t0 (채혈)` : undefined}>
+                  <th key={c} className={cls('tc', ev && 't0col')} title={ev ? `${ev.k}배 사건 · 채혈 ${hm(ev.drawn)}, 공개 ${hm(ev.t0)}` : undefined}>
                     <div className="th-d">{md(c)}</div>
                     <div>{hm(c)}</div>
                     {ev && <span className="t0tag">{ev.k}배</span>}

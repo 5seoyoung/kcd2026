@@ -2,3 +2,13 @@
 docs/
 
 .DS_Store
+
+# Reference PDFs for the Q&A (copyrighted, not for a public repo)
+RAG/
+
+# Evidence wiki working copy (teammate's source, includes copyrighted PDFs).
+# The site uses the generated web/public/wiki/kb.json instead.
+wiki_kb/
+
+# MIMIC model package (models, notebooks, subject id list): review before publishing
+kcd_model_package_*/

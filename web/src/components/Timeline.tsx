@@ -70,7 +70,7 @@ export function Timeline({ cs, sim, clock, onSeek, onJump, onAgent }: Props) {
 
   // 사건과 에이전트 실행은 기준 시각에 알게 된 것만
   const items: Item[] = cs.events.filter(e => known(e.start)).map(e => ({ ...e }))
-  for (const ev of [sim.e2, sim.e5]) {
+  for (const ev of [sim.first, sim.target]) {
     if (!ev || !known(ev.detectAt)) continue
     items.push({
       id: `ev${ev.k}`, lane: 'test', start: ev.t0,
@@ -93,8 +93,11 @@ export function Timeline({ cs, sim, clock, onSeek, onJump, onAgent }: Props) {
     }
   }
   if (alarm) items.push(alarm)
-  if (sim.e2 && known(sim.e2.detectAt)) items.push({ id: 'a2', lane: 'ai', label: '종료 상태 예측', start: sim.e2.detectAt, agent: 2 })
-  if (sim.e5 && known(sim.e5.detectAt)) items.push({ id: 'a3', lane: 'ai', label: '원인 추정', start: sim.e5.detectAt, agent: 3 })
+  // 첫 이상 때 종료 상태 예측과 원인 추정이 함께 돈다
+  if (sim.first && known(sim.first.detectAt)) {
+    items.push({ id: 'a3', lane: 'ai', label: '원인 추정', start: sim.first.detectAt, agent: 3 })
+    items.push({ id: 'a2', lane: 'ai', label: '종료 상태 예측', start: sim.first.detectAt, agent: 2 })
+  }
   items.sort((a, b) => toMs(a.start) - toMs(b.start))
 
   const endOf = (e: Item) =>
@@ -139,7 +142,7 @@ export function Timeline({ cs, sim, clock, onSeek, onJump, onAgent }: Props) {
     e.preventDefault()
   }
 
-  const marks = [sim.e2, sim.e5].filter(ev => ev && known(ev.detectAt))
+  const marks = [sim.first, sim.target].filter(ev => ev && known(ev.detectAt))
   const hx = hover ? sx(hover) : 0
 
   return (
@@ -212,7 +215,7 @@ export function Timeline({ cs, sim, clock, onSeek, onJump, onAgent }: Props) {
           ))}
           {marks.map(ev => (
             <g key={ev!.k} className="tl-evmark">
-              <title>{`${ev!.k}배 사건 t0 ${mdhm(ev!.t0)}`}</title>
+              <title>{`${ev!.k}배 사건 · 공개 ${mdhm(ev!.t0)} (채혈 ${mdhm(ev!.drawn)})`}</title>
               <line x1={sx(ev!.t0)} x2={sx(ev!.t0)} y1={TOP - 2} y2={axisY} />
             </g>
           ))}

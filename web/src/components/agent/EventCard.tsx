@@ -13,7 +13,7 @@ interface Props {
 const COMPANION = ['ALT', 'AST', 'ALP', 'TB', 'INR']
 const short = (name: string) => name.split(' (')[0]
 
-/** 사건 카드: 트리거 결과, 배수, t0, 집단, 같은 채혈의 동반 검사, 손상 패턴 */
+/** 사건 카드: 트리거 결과, 배수, t0 (공개 시각), 채혈 시각, 집단, 같은 채혈의 동반 검사, 손상 패턴 */
 export function EventCard({ cs, ev, compact, onJump }: Props) {
   const { item, result: trig } = ev
   const R = rRatio(cs, ev)
@@ -24,7 +24,7 @@ export function EventCard({ cs, ev, compact, onJump }: Props) {
     <div className="alert-card">
       <div className="ac-head">
         <span className="ac-icon" aria-hidden>!</span>
-        <strong>간 검사 이상 · {ev.k}배 사건</strong>
+        <strong>간 검사 이상 · {ev.k === 2 ? '첫 이상 (2배)' : `${ev.k}배 사건`}</strong>
         <span className="ac-group">{ev.group}</span>
       </div>
       <div className="ac-main">
@@ -32,13 +32,13 @@ export function EventCard({ cs, ev, compact, onJump }: Props) {
           {short(item.name).split(' ')[0]} {fmtNum(trig.value, item.dp)} <small>{item.unit}</small>
         </span>
         <span>
-          기준 상한 {item.high} 의 <b>{xUln(item, trig.value)!.toFixed(1)}배</b>
+          기록 상한 {item.high} 의 <b>{xUln(item, trig.value)!.toFixed(1)}배</b>
           <span className="muted"> (사건 기준: {fmtNum(item.high! * ev.k, item.dp)} 이상)</span>
         </span>
       </div>
       <dl className="ac-meta">
-        <div><dt>t0 (채혈)</dt><dd className="mono">{mdhm(ev.t0)}</dd></div>
-        <div><dt>결과 보고</dt><dd className="mono">{hm(trig.storetime)}</dd></div>
+        <div><dt>t0 (공개)</dt><dd className="mono">{mdhm(ev.t0)}</dd></div>
+        <div><dt>채혈</dt><dd className="mono">{hm(ev.drawn)}</dd></div>
         <div><dt>ICU 입실 뒤</dt><dd>{hoursBetween(cs.icuIn, ev.t0).toFixed(1)}시간</dd></div>
         {ev.prev && <div><dt>직전 값</dt><dd>{fmtNum(ev.prev.value, item.dp)} <span className="mono muted">({mdhm(ev.prev.charttime)})</span></dd></div>}
       </dl>

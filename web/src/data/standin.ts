@@ -1,16 +1,16 @@
-// 에이전트 1 (발생 예측), 4 (24시간 궤적) 의 대체 계산. 팀 모델을 받으면 같은 형식 (A1Point, A4Forecast) 의 출력으로 바꾼다.
-// 둘 다 기준 시각까지 결과가 나온 기록만 쓴다.
+// 에이전트 1 (발생 예측), 4 (24시간 궤적) 의 대체 계산. MIMIC 연구원의 모델을 받으면 같은 형식 (A1Point, A4Forecast) 의 출력으로 바꾼다.
+// 둘 다 기준 시각까지 공개된 기록만 쓴다.
 import type { A1Point, A4Forecast, CaseData, Factor } from '../types'
 import { activeAt, EVENT_CODES, itemOf, seriesAt, uln } from '../lib/events'
 import { fmtNum } from '../lib/lab'
 import { rateAt } from '../lib/ui'
-import { addHours, ceilHour, hourly, hoursBetween, isAfter } from '../lib/time'
+import { addHours, hoursBetween, isAfter } from '../lib/time'
 
 const sigmoid = (x: number) => 1 / (1 + Math.exp(-x))
 const short = (name: string) => name.split(' (')[0]
 
 /**
- * 에이전트 1 대체 모델: 24시간 안 5배 사건 확률.
+ * 에이전트 1 대체 모델: 24시간 안 5배 사건 확률. 정상 구간 (normalAt) 에서만 부른다.
  * 간 검사 마지막 배수와 상승 속도 (선행 연구의 평균, 기울기 특징) 에 혈역학 특징을 더한 로지스틱 식.
  */
 export function agent1At(cs: CaseData, t: string): A1Point {
@@ -57,14 +57,18 @@ export function agent1At(cs: CaseData, t: string): A1Point {
   return { time: t, p, factors: factors.map(x => x.f) }
 }
 
+/** 예측 범위 (명세서: 6, 12, 18, 24시간) */
+export const HORIZONS = [6, 12, 18, 24]
 /** 감쇠 시간 (시간). 추세는 이만큼 지나면 거의 멈춘다고 봄 */
 const TAU = 12
 /** 로그 기울기 상한 (시간당) */
 const MAX_SLOPE = 0.035
+/** 정규분포 90% 분위수. 10~90% 범위를 그린다 */
+const Z90 = 1.2816
 
 /**
  * 에이전트 4 대체 모델: 실행안의 기준 모델 '선형 추세' 를 로그 값에서 감쇠시켜 씀.
- * 마지막 두 값 (6시간 이상 간격) 의 기울기로 앞으로 24시간을 그리고, 멀어질수록 범위를 넓힌다.
+ * 마지막 두 값 (6시간 이상 간격) 의 기울기로 예측 범위마다 중앙값을 내고, 멀어질수록 10~90% 범위를 넓힌다.
  */
 export function agent4At(cs: CaseData, t: string): A4Forecast[] {
   const out: A4Forecast[] = []
@@ -75,20 +79,14 @@ export function agent4At(cs: CaseData, t: string): A4Forecast[] {
     const prev = rs.filter(r => hoursBetween(r.charttime, last.charttime) >= 6).at(-1)
     const raw = prev ? Math.log(last.value / prev.value) / hoursBetween(prev.charttime, last.charttime) : 0
     const s = Math.max(-MAX_SLOPE, Math.min(MAX_SLOPE, raw))
-    const end = addHours(t, 24)
-    const times = [last.charttime, ...hourly(ceilHour(addHours(last.charttime, 1 / 60)), end)]
-    const points = times.map(time => {
+    const points = HORIZONS.map(h => {
+      const time = addHours(t, h)
       const d = hoursBetween(last.charttime, time)
       const v = last.value * Math.exp(s * TAU * (1 - Math.exp(-d / TAU)))
       const sd = 0.06 + 0.011 * d
-      return { time, v, lo: v * Math.exp(-sd), hi: v * Math.exp(sd) }
+      return { h, time, v, lo: v * Math.exp(-Z90 * sd), hi: v * Math.exp(Z90 * sd) }
     })
     out.push({ code, last: { time: last.charttime, value: last.value }, points })
   }
   return out
-}
-
-/** 예측선에서 그 시각의 값 */
-export function forecastAt(f: A4Forecast, t: string) {
-  return f.points.find(p => p.time === t) ?? f.points.at(-1)!
 }

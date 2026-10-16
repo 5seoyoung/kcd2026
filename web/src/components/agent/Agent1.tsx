@@ -2,9 +2,9 @@ import { useState, type KeyboardEvent, type MouseEvent } from 'react'
 import type { A1Point, LiverEvent } from '../../types'
 import type { Sim } from '../../data'
 import { fmtNum } from '../../lib/lab'
-import { addHours, daysBetween, hm, hoursBetween, isAfter, md, mdhm, toMs } from '../../lib/time'
+import { addHours, daysBetween, hm, isAfter, md, mdhm, toMs } from '../../lib/time'
 import { cls, useWidth } from '../../lib/ui'
-import { a1Now, pct } from './state'
+import { a1Now, a1Verdict, pct } from './state'
 import { FactorList } from './FactorList'
 
 interface Props {
@@ -14,53 +14,82 @@ interface Props {
 }
 
 const short = (name: string) => name.split(' (')[0]
+const HOUR = 3_600_000
 
 export function Agent1({ sim, clock, events }: Props) {
   const a1 = sim.a1
-  const { point, started, ended } = a1Now(sim, clock)
-  if (!a1.eligible) {
-    return <div className="ad-wait">ICU 첫 채혈부터 5배 이상이라 발생 예측 대상이 아닙니다.</div>
+  const { point, unknown, started, ended } = a1Now(sim, clock)
+  if (sim.excluded) {
+    return <div className="ad-wait">ICU 입실 전 같은 입원에서 이미 2배 이상이라 분석 대상이 아닙니다.</div>
   }
-  if (!started || !point) {
-    return <div className="ad-wait">ICU 에서 첫 간 검사 결과가 나오면 매시간 실행합니다.</div>
+  if (!started) {
+    return <div className="ad-wait">ICU 에서 첫 간 검사 결과가 공개되면 첫 이상 전까지 매시간 실행합니다.</div>
   }
   const shown = a1.points.filter(p => !isAfter(p.time, clock))
-  const alarm = point.p >= a1.threshold
-  const e5 = sim.e5
-  const stopped = ended && !!e5
+  const gaps = a1.unknown.filter(u => !isAfter(u.time, clock)).map(u => u.time)
+  const v = a1Verdict(sim, clock)
+  const first = sim.first
+  const stopped = ended && !!first
+  // 멈춘 뒤에는 마지막 출력의 24시간 정답 확인 구간까지 보여 줌
+  const end = stopped && shown.length ? (isAfter(clock, addHours(shown.at(-1)!.time, 24)) ? addHours(shown.at(-1)!.time, 24) : clock) : clock
+  const alarm = !!point && !unknown && point.p >= a1.threshold
 
   return (
     <div className="ad">
       <div className="ad-head">
-        <span className={cls('ad-big', alarm && 'alarm')}>{pct(point.p)}</span>
-        <span className="ad-what">
-          <b>24시간 안 5배 사건 확률</b>
-          <span className="muted">{mdhm(point.time)} 실행{stopped ? ' · 마지막' : ''} · 경보 기준 {pct(a1.threshold)}</span>
-        </span>
+        {unknown ? (
+          <>
+            <span className="ad-big unk">판정 불가</span>
+            <span className="ad-what">
+              <b>이번 시각은 정상 구간이 아님</b>
+              <span className="muted">{mdhm(clock)} · {unknown}</span>
+            </span>
+          </>
+        ) : point ? (
+          <>
+            <span className={cls('ad-big', alarm && 'alarm')}>{pct(point.p)}</span>
+            <span className="ad-what">
+              <b>24시간 안 5배 사건 확률</b>
+              <span className="muted">{mdhm(point.time)} 실행{stopped ? ' · 마지막' : ''} · 경보 기준 {pct(a1.threshold)}</span>
+            </span>
+          </>
+        ) : (
+          <span className="ad-what"><b>정상 구간 대기</b></span>
+        )}
         <span className="spacer" />
-        {alarm ? <span className="flag alarm">경보</span> : <span className="flag">기준 미만</span>}
+        {point && !unknown && (alarm ? <span className="flag alarm">경보</span> : <span className="flag">기준 미만</span>)}
       </div>
 
-      <RiskChart points={shown} threshold={a1.threshold} start={a1.start!} end={stopped ? a1.stop! : clock} events={events} firstAlarm={a1.firstAlarm} />
+      {shown.length > 0 && (
+        <RiskChart points={shown} gaps={gaps} threshold={a1.threshold} start={a1.start!} end={end} events={events} firstAlarm={a1.firstAlarm} verifyFrom={stopped ? shown.at(-1)!.time : undefined} />
+      )}
 
       {stopped && (
         <div className="ad-box">
-          <b>5배 사건으로 멈춤.</b> {short(e5.item.name)} {fmtNum(e5.result.value, e5.item.dp)} ({mdhm(e5.t0)} 채혈).{' '}
-          {a1.firstAlarm
-            ? <>첫 경보 {mdhm(a1.firstAlarm)}, 사건 채혈 <b>{hoursBetween(a1.firstAlarm, e5.t0).toFixed(1)}시간</b> 전.</>
-            : '사건 전에 경보가 없었습니다.'}
+          <b>첫 이상으로 멈춤.</b> {short(first.item.name)} {fmtNum(first.result.value, first.item.dp)} ({first.k}배, {mdhm(first.t0)} 공개).
+          {v && (v.pending
+            ? <> 마지막 출력 ({hm(v.last.time)}, {pct(v.last.p)}) 의 정답은 {mdhm(v.until)} 까지 5배 사건이 생기는지로 확인합니다.</>
+            : v.kind === 'hit'
+              ? <> 5배 사건 {mdhm(v.target!.t0)} 공개 ({short(v.target!.item.name)} {fmtNum(v.target!.result.value, v.target!.item.dp)}). 첫 경보 {mdhm(a1.firstAlarm!)}, 사건 <b>{v.lead!.toFixed(1)}시간</b> 전 → <b className="ok-ink">적중</b>.</>
+              : v.kind === 'miss'
+                ? <> 경보 없이 5배 사건이 생겼습니다 ({mdhm(v.target!.t0)} 공개) → 놓침.</>
+                : v.kind === 'false'
+                  ? <> 경보했지만 {mdhm(v.until)} 까지 5배 사건이 없었습니다 → 오경보.</>
+                  : <> 경보 없이 {mdhm(v.until)} 까지 5배 사건이 없었습니다.</>)}
         </div>
       )}
       {!stopped && a1.firstAlarm && !isAfter(a1.firstAlarm, clock) && (
-        <div className="ad-box">첫 경보 {mdhm(a1.firstAlarm)}. 사건이 생기면 이 에이전트는 멈추고 원인 추정이 돕니다.</div>
+        <div className="ad-box">첫 경보 {mdhm(a1.firstAlarm)}. 첫 이상 (2배) 이 공개되면 이 에이전트는 멈추고 종료 상태 예측과 원인 추정이 돕니다.</div>
       )}
 
-      <section className="sub-card">
-        <h4>이 시각의 입력 <span className="h4-sub">{mdhm(point.time)} · 위험에 많이 기여한 순</span></h4>
-        <FactorList factors={point.factors} up="위험 높임" down="영향 적음" />
-      </section>
+      {point && (
+        <section className="sub-card">
+          <h4>{unknown ? '마지막 출력의 입력' : '이 시각의 입력'} <span className="h4-sub">{mdhm(point.time)} · 위험에 많이 기여한 순</span></h4>
+          <FactorList factors={point.factors} up="위험 높임" down="영향 적음" />
+        </section>
+      )}
       <p className="note">
-        대상: ICU 첫 채혈이 5배 미만인 환자. 사건: ALT, ALP, 총빌리 중 하나가 5 x ULN 이상. 기준 시각까지 결과가 나온 기록만 씁니다.
+        정상 구간 (ALT, ALP, 총빌리를 모두 최근 24시간 안에 쟀고 모두 2 x ULN 미만) 에서만 예측하고, 아니면 판정 불가로 둡니다. 첫 이상 (2배) 전까지만 돌고, 목표는 24시간 안 5 x ULN 사건입니다. 기준 시각까지 공개된 기록만 씁니다.
       </p>
     </div>
   )
@@ -74,15 +103,19 @@ const H = TOP + PH + 20
 
 interface ChartProps {
   points: A1Point[]
+  /** 판정 불가 시각 */
+  gaps: string[]
   threshold: number
   start: string
   end: string
   events: LiverEvent[]
   firstAlarm?: string
+  /** 멈춘 뒤 정답 확인 구간의 시작 (마지막 출력 시각) */
+  verifyFrom?: string
 }
 
-/** 시간별 발생 확률 한 줄. 축은 하나 (0~100%), 경보 기준은 점선 */
-function RiskChart({ points, threshold, start, end, events, firstAlarm }: ChartProps) {
+/** 시간별 발생 확률 한 줄. 축은 하나 (0~100%), 경보 기준은 점선, 판정 불가 시각은 선을 끊고 아래에 회색 칸 */
+function RiskChart({ points, gaps, threshold, start, end, events, firstAlarm, verifyFrom }: ChartProps) {
   const [ref, width] = useWidth<HTMLDivElement>()
   const [hover, setHover] = useState<number | null>(null)
   const W = Math.max(width, 300)
@@ -92,10 +125,16 @@ function RiskChart({ points, threshold, start, end, events, firstAlarm }: ChartP
   const x1 = toMs(xEnd)
   const sx = (t: string) => PAD_L + ((toMs(t) - x0) / (x1 - x0)) * (W - PAD_L - PAD_R)
   const sy = (p: number) => TOP + PH - p * PH
-  const path = points.map((p, i) => `${i ? 'L' : 'M'}${sx(p.time)},${sy(p.p)}`).join(' ')
+  // 한 시간보다 벌어지면 선을 끊음
+  const path = points
+    .map((p, i) => `${i && toMs(p.time) - toMs(points[i - 1].time) <= HOUR ? 'L' : 'M'}${sx(p.time)},${sy(p.p)}`)
+    .join(' ')
   const midnights = daysBetween(start, xEnd).slice(1)
   const fa = firstAlarm ? points.find(p => p.time === firstAlarm) : undefined
   const evs = events.filter(e => !isAfter(start, e.t0) && !isAfter(e.t0, xEnd))
+  const hourW = (W - PAD_L - PAD_R) * (HOUR / (x1 - x0))
+  const vx = verifyFrom ? sx(verifyFrom) : 0
+  const vEnd = verifyFrom ? Math.min(sx(addHours(verifyFrom, 24)), W - PAD_R) : 0
 
   const pick = (e: MouseEvent<SVGRectElement>) => {
     const box = e.currentTarget.getBoundingClientRect()
@@ -117,6 +156,17 @@ function RiskChart({ points, threshold, start, end, events, firstAlarm }: ChartP
     <div className="mchart" ref={ref}>
       <svg width={W} height={H} tabIndex={0} onKeyDown={onKey} onBlur={() => setHover(null)} role="img"
         aria-label="시간별 24시간 안 5배 사건 확률. 좌우 화살표로 시각을 옮길 수 있습니다">
+        <defs>
+          <pattern id="a1-hatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="4" className="mc-gap-line" />
+          </pattern>
+        </defs>
+        {verifyFrom && (
+          <g>
+            <rect x={vx} y={TOP} width={Math.max(0, vEnd - vx)} height={PH} className="mc-verify" />
+            <text x={vx + 4} y={TOP + PH - 4} className="mc-verify-label">정답 확인 24시간</text>
+          </g>
+        )}
         {[0, 0.5, 1].map(v => (
           <g key={v}>
             <line x1={PAD_L} x2={W - PAD_R} y1={sy(v)} y2={sy(v)} className={v === 0 ? 'mc-base' : 'mc-grid'} />
@@ -128,6 +178,11 @@ function RiskChart({ points, threshold, start, end, events, firstAlarm }: ChartP
             <line x1={sx(`${d} 00:00`)} x2={sx(`${d} 00:00`)} y1={TOP} y2={TOP + PH} className="mc-grid" />
             <text x={sx(`${d} 00:00`)} y={H - 5} textAnchor="middle" className="mc-tick">{md(d)}</text>
           </g>
+        ))}
+        {gaps.map(t => (
+          <rect key={t} x={sx(t) - hourW / 2} y={TOP + PH - 7} width={Math.max(2, hourW)} height={7} fill="url(#a1-hatch)" className="mc-gap">
+            <title>{`${mdhm(t)} 판정 불가`}</title>
+          </rect>
         ))}
         <line x1={PAD_L} x2={W - PAD_R} y1={sy(threshold)} y2={sy(threshold)} className="mc-thr" />
         <text x={PAD_L + 4} y={sy(threshold) - 3} className="mc-thr-label">경보 {threshold * 100}%</text>
@@ -159,6 +214,10 @@ function RiskChart({ points, threshold, start, end, events, firstAlarm }: ChartP
           <b>{pct(hp.p)}</b> <span className="muted">{hp.p >= threshold ? '경보' : '기준 미만'}</span>
         </div>
       )}
+      {gaps.length > 0 && (
+        <div className="mc-legend"><span className="lg gap" /> 판정 불가 {gaps.length}시간 (정상 구간 아님)</div>
+      )}
     </div>
   )
 }
+

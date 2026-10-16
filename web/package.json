@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "wiki": "node scripts/build-wiki.mjs ../wiki_kb public/wiki/kb.json",
+    "rag-server": "node server/rag-server.mjs"
   },
   "dependencies": {
     "react": "^19.3.1",
