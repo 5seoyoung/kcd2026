@@ -64,6 +64,8 @@ export interface MarOrder {
   freq: string
   start: string
   admins: MarAdmin[]
+  /** 지속 주입 (모델 자료의 주입 기록). 아니면 투여 기록 */
+  infusion?: boolean
 }
 
 export interface VitalRow {
@@ -127,10 +129,14 @@ export interface CaseData {
   outcome: {
     /** ICU 사망 (ICU 퇴실 뒤 24시간 안 사망 포함) */
     icuDeath: boolean
+    /** 사망 시각 (있으면). ICU 안 사망이면 ICU 퇴실 시각과 같음 */
+    deathTime?: string
     /** 보조: 원내사망 또는 퇴원 뒤 1년 안 사망 */
     death1y: boolean
     dischargeTo: string
   }
+  /** 이전 입원 (과거력 모델 입력). 이번 ICU 입실 전에 퇴원한 입원의 진단 코드 */
+  history?: { admitted: string; discharged: string; codes: { code: string; version: 9 | 10; name: string }[] }[]
   labItems: LabItem[]
   labs: LabResult[]
   mar: MarOrder[]
@@ -202,9 +208,12 @@ export interface CauseCall {
 
 export interface SuspectDrug {
   drug: string
+  /** 첫 투여부터 사건 채혈까지 */
   latency: string
-  hepatotox: string
-  pattern: string
+  /** t0 전 48시간 안 마지막 투여 */
+  last: string
+  /** 원인 규칙이 DILI 근거로 인용했는지 (규칙은 최근 두 약만 인용) */
+  cited: boolean
   ref?: Ref
 }
 
@@ -220,6 +229,8 @@ export interface AgentRun {
   suspectDrugs: SuspectDrug[]
   recommendedTests: { name: string; why: string }[]
   verification: { total: number; matched: number; issues: { text: string; detail: string }[] }
+  /** 화면 표시 확신 (규칙 결과에서 계산, 모델 출력 아님) */
+  confidence?: { level: '높음' | '중간' | '낮음' | '판단 보류'; why: string }
 }
 
 // ───────── 에이전트 1, 2, 4 와 모델 1 출력 (다른 곳에서 만든 모델이 들어올 자리) ─────────
@@ -238,6 +249,8 @@ export interface A1Point {
   /** 설명의 기준값 (합성 기준 행에서의 평균 확률). 요인은 이 값에서 얼마나 올리고 내렸는지 */
   base?: number
   factors: Factor[]
+  /** 화면 표시 확신: 핵심 입력 (젖산, INR) 이 최근 24시간 안에 있는지 */
+  confidence?: { level: '높음' | '낮음'; why?: string }
 }
 
 export type EndState = 'rec-alive' | 'rec-dead' | 'norec-dead' | 'norec-alive'

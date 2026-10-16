@@ -16,7 +16,7 @@ export function TopBar({ now }: { now: string }) {
         ))}
       </nav>
       <div className="top-right">
-        <span>중환자실 MICU</span>
+        <span>중환자실</span>
         <span>중환자의학과 · ICU01</span>
         <span className="mono">{now}</span>
       </div>

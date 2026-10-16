@@ -9,6 +9,7 @@
 출력에는 환자 식별 번호가 없다 (안에서 쓰는 stay_id 는 1).
 
   KCD_PYTHON=<python 3.11, scikit-learn 1.9.0 ...> npm run models
+  (직접 실행: run_models.py --package <패키지> --cases-dir model-bridge/cases --out-dir src/data/model)
 """
 from __future__ import annotations
 
@@ -44,25 +45,31 @@ def fmt(t) -> str:
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--package", type=Path, required=True)
-    ap.add_argument("--case", type=Path, required=True)
-    ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--cases-dir", type=Path, required=True)
+    ap.add_argument("--out-dir", type=Path, required=True)
     a = ap.parse_args(argv)
     warnings.filterwarnings("ignore")
     pkg = a.package.resolve()
     sys.path.insert(0, str(pkg))
     import joblib
     import sklearn
-    from kcd_liver import develop as D
-    from kcd_liver.pattern import _apply_params, assign_clusters, r_pattern
-    from kcd_liver.rule_agent import CAUSE_FLAGS, VERSION as RULE_VERSION, rule_agent1
 
     card = (pkg / "MODEL_CARD.md").read_text(encoding="utf-8")
     need = re.search(r"scikit-learn ([0-9.]+)", card).group(1)
     if sklearn.__version__ != need:
         raise SystemExit(f"scikit-learn {need} 이 필요합니다 (지금 {sklearn.__version__}). MODEL_CARD.md 의 버전으로 실행하세요.")
-    M = lambda n: joblib.load(pkg / "models" / n)
+    cache = {}
+    M = lambda n: cache.setdefault(n, joblib.load(pkg / "models" / n))
+    for path in sorted(a.cases_dir.glob("*.json")):
+        run_case(json.loads(path.read_text(encoding="utf-8")), pkg, card, M, a.out_dir / path.name)
 
-    C = json.loads(a.case.read_text(encoding="utf-8"))
+
+def run_case(C: dict, pkg: Path, card: str, M, out_path: Path):
+    import sklearn
+    from kcd_liver import develop as D
+    from kcd_liver.pattern import _apply_params, assign_clusters, r_pattern
+    from kcd_liver.rule_agent import CAUSE_FLAGS, VERSION as RULE_VERSION, rule_agent1
+
     T = pd.Timestamp
     intime, outtime = T(C["icuIn"]), T(C["icuOut"])
 
@@ -78,7 +85,13 @@ def main(argv=None):
     ctx += [{"stay_id": SID, "kind": m["kind"], "label": m["drug"], "value": m["value"], "unit": "", "charttime": T(m["time"]),
              "available_at": T(m["time"])} for m in C["meds"]]
     context = pd.DataFrame(ctx)
-    hist = D.history_flags(cohort, None, None)  # 이전 입원 없음 → 과거력은 결측 (0 이 아님)
+    # 과거력: 이번 ICU 입실 전에 퇴원한 이전 입원의 진단 코드 (없으면 결측, 0 이 아님)
+    prev = C.get("history") or []
+    adm = pd.DataFrame([{"subject_id": SID, "hadm_id": 100 + i, "dischtime": T(h["discharged"])} for i, h in enumerate(prev)]) if prev else None
+    dx = pd.DataFrame([{"subject_id": SID, "hadm_id": 100 + i, "icd_code": c["code"], "icd_version": c["version"]}
+                       for i, h in enumerate(prev) for c in h["codes"]]) if prev else None
+    hist = D.history_flags(cohort, adm, dx)
+    hist_row = {k: v for k, v in hist.drop(columns="stay_id").iloc[0].items()}
 
     # ---- 제외 기준과 첫 이상 (2배)
     pre = lab[lab.analyte.isin(D.TRIGGERS) & (lab.charttime < intime) & (lab.ratio >= 2)]
@@ -146,9 +159,9 @@ def main(argv=None):
                      "icu_death": r4(pd_), "inputs": {k: r4(X0[k].iloc[0]) for k in AGENT2_INPUTS if k in X0}}
 
         # ---- 3 원인: 규칙 (학습 없음), 48시간 스냅숏
-        payload = D.snapshot_payload(SID, t0, {SID: lab}, {SID: context}, {})
+        payload = D.snapshot_payload(SID, t0, {SID: lab}, {SID: context}, hist_row)
         r = rule_agent1(payload)
-        out["a3"] = {"t0": fmt(t0), "model": RULE_VERSION, "pattern": r["pattern"], "abstain": r["abstain"],
+        out["a3"] = {"t0": fmt(t0), "model": RULE_VERSION, "pattern": r["pattern"], "abstain": r["abstain"], "history": {k: (None if pd.isna(v) else bool(v)) for k, v in hist_row.items()},
                      "uncertainty": r["uncertainty"], "flags": {c: r["flags"][c] for c in CAUSE_FLAGS},
                      "snapshot": {"labs": len(payload["labs"]), "context": len(payload["context"])}}
 
@@ -186,10 +199,10 @@ def main(argv=None):
                    "built_at": b1.get("built_at"), "sklearn": sklearn.__version__, "python": sys.version.split()[0],
                    "rule_model": RULE_VERSION, "agent1_internal": {"auroc": r4(float(auroc.group(1))), "auprc": r4(float(auroc.group(2)))} if auroc else None,
                    "case": C["caseId"], "note": "가상 사례에 고정 모델을 적용한 출력. 환자 식별 번호 없음."}
-    a.out.parent.mkdir(parents=True, exist_ok=True)
-    a.out.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     n1 = sum(1 for x in out["a1"] if x["eligible"])
-    print(f"{a.out}: 발생 예측 {len(out['a1'])}시각 (정상 {n1}), 궤적 {len(out['a4'])}시각, 첫 이상 {out['first_event'] and out['first_event']['t0']}")
+    print(f"{out_path}: 발생 예측 {len(out['a1'])}시각 (정상 {n1}), 궤적 {len(out['a4'])}시각, 첫 이상 {out['first_event'] and out['first_event']['t0']}")
 
 
 if __name__ == "__main__":

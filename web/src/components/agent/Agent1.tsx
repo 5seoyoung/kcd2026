@@ -1,13 +1,14 @@
 import { useState, type KeyboardEvent, type MouseEvent } from 'react'
-import type { A1Point, LiverEvent } from '../../types'
+import type { A1Point, CaseData, LiverEvent } from '../../types'
 import type { Sim } from '../../data'
 import { fmtNum } from '../../lib/lab'
-import { addHours, daysBetween, hm, isAfter, md, mdhm, toMs } from '../../lib/time'
+import { addHours, daysBetween, hm, hoursBetween, isAfter, md, mdhm, toMs } from '../../lib/time'
 import { cls, useWidth } from '../../lib/ui'
 import { a1Now, a1Verdict, pct } from './state'
 import { FactorList } from './FactorList'
 
 interface Props {
+  cs: CaseData
   sim: Sim
   clock: string
   events: LiverEvent[]
@@ -16,11 +17,19 @@ interface Props {
 const short = (name: string) => name.split(' (')[0]
 const HOUR = 3_600_000
 
-export function Agent1({ sim, clock, events }: Props) {
+export function Agent1({ cs, sim, clock, events }: Props) {
   const a1 = sim.a1
   const { point, unknown, started, ended } = a1Now(sim, clock)
   if (sim.excluded) {
     return <div className="ad-wait">ICU 입실 전 같은 입원에서 이미 2배 이상이라 분석 대상이 아닙니다.</div>
+  }
+  if (a1.notEligible && sim.first && !isAfter(sim.first.detectAt, clock)) {
+    return (
+      <div className="ad-wait">
+        <b>대상 아님</b>
+        <div>{a1.notEligible}. 첫 이상 {mdhm(sim.first.t0)} 공개 (ICU 입실 뒤 {Math.round(hoursBetween(cs.icuIn, sim.first.t0))}시간). 발생 예측은 정상 구간에서만 돕니다.</div>
+      </div>
+    )
   }
   if (!started) {
     return <div className="ad-wait">ICU 에서 첫 간 검사 결과가 공개되면 첫 이상 전까지 매시간 실행합니다.</div>
@@ -52,6 +61,11 @@ export function Agent1({ sim, clock, events }: Props) {
             <span className="ad-what">
               <b>24시간 안 5배 사건 확률</b>
               <span className="muted">{mdhm(point.time)} 실행{stopped ? ' · 마지막' : ''} · 경보 기준 {pct(a1.threshold)}</span>
+              {point.confidence && (
+                <span className={cls('conf-line', point.confidence.level === '낮음' && 'low')}>
+                  확신 {point.confidence.level}{point.confidence.why ? ` · ${point.confidence.why}` : ''}
+                </span>
+              )}
             </span>
           </>
         ) : (
@@ -62,7 +76,8 @@ export function Agent1({ sim, clock, events }: Props) {
       </div>
 
       {shown.length > 0 && (
-        <RiskChart points={shown} gaps={gaps} threshold={a1.threshold} start={a1.start!} end={end} events={events} firstAlarm={a1.firstAlarm} verifyFrom={stopped ? shown.at(-1)!.time : undefined} />
+        <RiskChart points={shown} gaps={gaps} threshold={a1.threshold} start={a1.start!} end={end} events={events} firstAlarm={a1.firstAlarm} verifyFrom={stopped ? shown.at(-1)!.time : undefined}
+          lowConf={shown.filter(p => p.confidence?.level === '낮음').map(p => p.time)} />
       )}
 
       {stopped && (
@@ -96,7 +111,7 @@ export function Agent1({ sim, clock, events }: Props) {
       )}
       <p className="note">
         {model && <>MIMIC-IV 로 학습한 그래디언트 부스팅 (변수 88개{model.auroc ? `, 내부 검증 AUROC ${model.auroc.toFixed(2)}, AUPRC ${model.auprc.toFixed(2)}` : ''}). </>}
-        정상 구간 (ALT, ALP, 총빌리를 모두 최근 24시간 안에 쟀고 모두 2 x ULN 미만) 에서만 예측하고, 아니면 판정 불가로 둡니다. 첫 이상 (2배) 전까지만 돌고, 목표는 24시간 안 5 x ULN 사건입니다. 경보 기준 {pct(a1.threshold)} 는 화면 설정입니다.
+        정상 구간 (ALT, ALP, 총빌리를 모두 최근 24시간 안에 쟀고 모두 2 x ULN 미만) 에서만 예측하고, 아니면 판정 불가로 둡니다. 첫 이상 (2배) 전까지만 돌고, 목표는 24시간 안 5 x ULN 사건입니다. 경보 기준 {pct(a1.threshold)} 와 확신 (젖산, INR 이 24시간 안에 있는지) 은 화면 설정입니다.
       </p>
     </div>
   )
@@ -119,10 +134,12 @@ interface ChartProps {
   firstAlarm?: string
   /** 멈춘 뒤 정답 확인 구간의 시작 (마지막 출력 시각) */
   verifyFrom?: string
+  /** 확신 낮음 (젖산, INR 이 24시간 안에 없음) 시각 */
+  lowConf: string[]
 }
 
 /** 시간별 발생 확률 한 줄. 축은 하나 (0~100%), 경보 기준은 점선, 판정 불가 시각은 선을 끊고 아래에 회색 칸 */
-function RiskChart({ points, gaps, threshold, start, end, events, firstAlarm, verifyFrom }: ChartProps) {
+function RiskChart({ points, gaps, threshold, start, end, events, firstAlarm, verifyFrom, lowConf }: ChartProps) {
   const [ref, width] = useWidth<HTMLDivElement>()
   const [hover, setHover] = useState<number | null>(null)
   const W = Math.max(width, 300)
@@ -190,6 +207,11 @@ function RiskChart({ points, gaps, threshold, start, end, events, firstAlarm, ve
             <text x={sx(`${d} 00:00`)} y={H - 5} textAnchor="middle" className="mc-tick">{md(d)}</text>
           </g>
         ))}
+        {lowConf.map(t => (
+          <rect key={`lc-${t}`} x={sx(t) - hourW / 2} y={TOP + PH - 4} width={Math.max(2, hourW)} height={4} className="mc-lowconf">
+            <title>{`${mdhm(t)} 확신 낮음`}</title>
+          </rect>
+        ))}
         {gaps.map(t => (
           <rect key={t} x={sx(t) - hourW / 2} y={TOP + PH - 7} width={Math.max(2, hourW)} height={7} fill="url(#a1-hatch)" className="mc-gap">
             <title>{`${mdhm(t)} 판정 불가`}</title>
@@ -213,7 +235,9 @@ function RiskChart({ points, gaps, threshold, start, end, events, firstAlarm, ve
         {fa && (
           <g>
             <circle cx={sx(fa.time)} cy={sy(fa.p)} r={4} className="mc-alarm" />
-            <text x={sx(fa.time) - 6} y={sy(fa.p) - 7} textAnchor="end" className="mc-note">첫 경보 {hm(fa.time)}</text>
+            {sx(fa.time) - PAD_L > 70
+              ? <text x={sx(fa.time) - 6} y={sy(fa.p) - 7} textAnchor="end" className="mc-note">첫 경보 {hm(fa.time)}</text>
+              : <text x={sx(fa.time) + 6} y={sy(fa.p) - 7} className="mc-note">첫 경보 {hm(fa.time)}</text>}
           </g>
         )}
         {points.length > 0 && <circle cx={sx(points.at(-1)!.time)} cy={sy(points.at(-1)!.p)} r={3} className="mc-end" />}
@@ -231,8 +255,11 @@ function RiskChart({ points, gaps, threshold, start, end, events, firstAlarm, ve
           <b>{pct(hp.p)}</b> <span className="muted">{hp.p >= threshold ? '경보' : '기준 미만'}</span>
         </div>
       )}
-      {gaps.length > 0 && (
-        <div className="mc-legend"><span className="lg gap" /> 판정 불가 {gaps.length}시간 (정상 구간 아님)</div>
+      {(gaps.length > 0 || lowConf.length > 0) && (
+        <div className="mc-legend">
+          {gaps.length > 0 && <><span className="lg gap" /> 판정 불가 {gaps.length}시간 (정상 구간 아님)</>}
+          {lowConf.length > 0 && <><span className="lg lowconf" /> 확신 낮음 {lowConf.length}시간 (젖산·INR 24시간 안 없음)</>}
+        </div>
       )}
     </div>
   )

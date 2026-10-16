@@ -70,11 +70,13 @@ export function Timeline({ cs, sim, clock, onSeek, onJump, onAgent }: Props) {
 
   // 사건과 에이전트 실행은 기준 시각에 알게 된 것만
   const items: Item[] = cs.events.filter(e => known(e.start)).map(e => ({ ...e }))
-  for (const ev of [sim.first, sim.target]) {
+  // 첫 이상과 5배 사건이 같은 결과면 한 표시로
+  const same = sim.first && sim.target && sim.first.result.id === sim.target.result.id
+  for (const ev of same ? [sim.target] : [sim.first, sim.target]) {
     if (!ev || !known(ev.detectAt)) continue
     items.push({
       id: `ev${ev.k}`, lane: 'test', start: ev.t0,
-      label: `${short(ev.item.name)} ${fmtNum(ev.result.value, ev.item.dp)} · ${ev.k}배`,
+      label: `${short(ev.item.name)} ${fmtNum(ev.result.value, ev.item.dp)} · ${same ? '2배, 5배' : `${ev.k}배`}`,
       ref: { tab: 'lab', row: ev.result.code, col: ev.result.id },
     })
   }

@@ -44,7 +44,7 @@ const caseOf = (patientId: string) => {
 }
 
 export default function App() {
-  const [patientId, setPatientId] = useState('p07')
+  const [patientId, setPatientId] = useState('c1')
   const patient = patients.find(p => p.id === patientId)!
   const cs = caseOf(patientId)
   const sim = cs ? getSim(cs) : undefined
@@ -213,7 +213,8 @@ export default function App() {
     if (!cs || !sim) return {}
     const a1 = a1Now(sim, clock)
     const alert = isKnown(sim.first, clock) ? 'event' : a1.point && !a1.ended && !a1.unknown && a1.point.p >= sim.a1.threshold ? 'risk' : null
-    return { [cs.patientId]: { stayDay: dayIndex(cs.icuIn, clock), alert, out: !isAfter(cs.icuOut, clock) } }
+    const out = !isAfter(cs.icuOut, clock)
+    return { [cs.patientId]: { stayDay: dayIndex(cs.icuIn, clock), alert, out, dead: out && cs.outcome.icuDeath && cs.outcome.deathTime === cs.icuOut } }
   }, [cs, sim, clock])
 
   const out = cs && !isAfter(cs.icuOut, clock)
@@ -361,6 +362,7 @@ export default function App() {
               <li>ICU 입실 전 같은 입원에서 이미 2배 이상이던 환자는 분석 대상이 아닙니다.</li>
               <li>에이전트는 그 시각까지 공개된 기록만 봅니다. 원인 범주 해당은 확진이 아니고, 치료나 약 중단 결정은 출력하지 않습니다. 검사를 안 한 것은 반대 근거가 아니라 없는 근거입니다.</li>
               <li>종료 상태 예측과 군집 정보는 원인 판정에 쓰지 않고 따로 보여 줍니다. 질의응답은 근거가 없으면 답하지 않습니다.</li>
+              <li>"확신" 은 모델 출력이 아니라 화면 표시입니다. 발생 예측은 젖산과 INR 이 24시간 안에 있는지, 원인 추정은 해당 범주 수와 판단 보류로 정합니다.</li>
             </ul>
             <p className="help-foot">KCD 2026 연구용 화면입니다. 환자 정보는 실제 환자가 아닙니다.</p>
           </div>

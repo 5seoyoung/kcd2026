@@ -9,6 +9,8 @@ export function PatientBanner({ p, cs, clock }: { p: Patient; cs?: CaseData; clo
     </div>
   )
   const out = cs && !isAfter(cs.icuOut, clock)
+  // ICU 안에서 사망 (사망 시각이 퇴실 시각과 같음)
+  const dead = !!cs?.outcome.icuDeath && cs.outcome.deathTime === cs.icuOut
   const badges = cs?.badges.filter(b => (!b.from || !isAfter(b.from, clock)) && (!b.to || isAfter(b.to, clock))) ?? []
   return (
     <div className="banner">
@@ -21,10 +23,11 @@ export function PatientBanner({ p, cs, clock }: { p: Patient; cs?: CaseData; clo
       {field('진료과', p.dept)}
       {field('진단', p.dx)}
       {cs && field('ICU 입실', `${mdhm(cs.icuIn)} (D+${dayIndex(cs.icuIn, out ? cs.icuOut : clock)})`)}
-      {out && field('ICU 퇴실', `${mdhm(cs!.icuOut)} · ${cs!.outcome.dischargeTo}`)}
+      {cs?.history?.length ? field('과거력', cs.history.flatMap(h => h.codes.map(c => `${c.name} (${c.code})`)).join(', ')) : null}
+      {out && field(dead ? 'ICU 사망' : 'ICU 퇴실', dead ? mdhm(cs!.icuOut) : `${mdhm(cs!.icuOut)} · ${cs!.outcome.dischargeTo}`)}
       {cs && field('키 / 몸무게', `${cs.height} cm / ${cs.weight} kg`)}
       <div className="b-badges">
-        {out && <span className="badge gray">퇴실</span>}
+        {out && <span className="badge gray">{dead ? '사망' : '퇴실'}</span>}
         {!out && badges.map(b => (
           <span key={b.label} className={`badge ${b.tone}`}>{b.label}</span>
         ))}

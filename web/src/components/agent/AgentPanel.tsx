@@ -57,7 +57,7 @@ export function AgentPanel(p: Props) {
             {NAMES[p.selected]}
           </div>
           <div className={p.selected === 'qa' ? 'agent-body qa-body' : 'agent-body'} role="tabpanel">
-            {p.selected === 1 && <Agent1 sim={sim} clock={clock} events={p.events} />}
+            {p.selected === 1 && <Agent1 cs={cs} sim={sim} clock={clock} events={p.events} />}
             {p.selected === 2 && <Agent2 cs={cs} sim={sim} clock={clock} onJump={p.onJump} />}
             {p.selected === 3 && (
               <Agent3

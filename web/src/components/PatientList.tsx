@@ -7,6 +7,8 @@ export interface LiveRow {
   /** event: 간 검사 이상 (2배 이상), risk: 발생 예측 경보 */
   alert: 'event' | 'risk' | null
   out: boolean
+  /** ICU 안에서 사망 */
+  dead?: boolean
 }
 
 interface Props {
@@ -21,7 +23,7 @@ export function PatientList({ selected, onSelect, live }: Props) {
   return (
     <section className="panel plist">
       <div className="panel-head">
-        재원 환자 <span className="head-sub">MICU · {patients.length}명</span>
+        재원 환자 <span className="head-sub">중환자실 · {patients.length}명</span>
       </div>
       <div className="plist-filter" aria-hidden>
         <span className="seg on">병동 전체</span>
@@ -46,10 +48,10 @@ export function PatientList({ selected, onSelect, live }: Props) {
                   tabIndex={0}
                   title={p.dx}
                 >
-                  <td className="mono">{p.bed.replace('MICU-', '')}</td>
+                  <td className="mono">{p.bed}</td>
                   <td>{p.name}</td>
                   <td>{p.sex}/{p.age}</td>
-                  <td>{lv?.out ? '퇴실' : `D+${lv ? lv.stayDay : p.stayDay}`}</td>
+                  <td>{lv?.out ? (lv.dead ? '사망' : '퇴실') : `D+${lv ? lv.stayDay : p.stayDay}`}</td>
                   <td>
                     {alert === 'event' && <span className="chip-liver" title="간 검사 이상 (2배 이상)">간</span>}
                     {alert === 'risk' && <span className="chip-liver risk" title="24시간 안 간 검사 이상 위험 (발생 예측 경보)">간</span>}

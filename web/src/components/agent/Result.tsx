@@ -116,8 +116,14 @@ export function Result({ run, models, onJump, onWiki }: Props) {
   return (
     <div className="result">
       <div className="res-summary">
+        {run.confidence && (
+          <span className={cls('conf', `c-${run.confidence.level}`)} title={`${run.confidence.why}. 규칙 결과로 정한 화면 표시입니다`}>
+            확신 {run.confidence.level}
+          </span>
+        )}
         <span className="res-tag">요약</span>
         {run.summary}
+        {run.confidence && <div className="conf-why">{run.confidence.why}</div>}
       </div>
 
       <section className="calls" aria-label="원인 범주 10개 규칙 판정">
@@ -131,13 +137,15 @@ export function Result({ run, models, onJump, onWiki }: Props) {
       </section>
 
       <section className="sub-card">
-        <h4>의심 약제 <span className="h4-sub">DILI 근거 보조 · 잠복기 → 간독성 → 패턴</span></h4>
+        <h4>의심 약제 <span className="h4-sub">48시간 안 투여된 간독성 목록의 약 · 규칙은 최근 두 약만 인용</span></h4>
+        {!run.suspectDrugs.length && <p className="note">48시간 안 간독성 목록의 약 투여 기록이 없습니다.</p>}
+        {run.suspectDrugs.length > 1 && <p className="note">후보 약이 {run.suspectDrugs.length}개라 어느 약인지는 판단 보류입니다.</p>}
         <table className="mini-grid">
-          <thead><tr><th>약</th><th>잠복기</th><th>간독성</th><th>패턴</th></tr></thead>
+          <thead><tr><th>약</th><th>첫 투여부터 사건 채혈까지</th><th>48시간 안 마지막 투여</th><th>규칙 인용</th></tr></thead>
           <tbody>
             {run.suspectDrugs.map(d => (
               <tr key={d.drug} className={d.ref ? 'clickable' : ''} onClick={() => d.ref && onJump(d.ref)}>
-                <td>{d.drug}</td><td>{d.latency}</td><td>{d.hepatotox}</td><td>{d.pattern}</td>
+                <td>{d.drug}</td><td>{d.latency}</td><td className="mono">{d.last}</td><td>{d.cited ? '인용' : <span className="muted">빠짐</span>}</td>
               </tr>
             ))}
           </tbody>

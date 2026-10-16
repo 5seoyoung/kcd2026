@@ -1,8 +1,8 @@
 import type { CaseData, Ref } from '../../types'
 import type { Sim } from '../../data'
-import { END_STATES, EVENT_CODES, inIcu, isKnown, itemOf, K_RECOVER, lastAt, sameDraw, seriesAt, uln } from '../../lib/events'
+import { END_STATES, EVENT_CODES, inIcu, isKnown, itemOf, K_RECOVER, lastAt, recoveryAt, sameDraw, seriesAt, uln } from '../../lib/events'
 import { fmtNum } from '../../lib/lab'
-import { isAfter, md, mdhm } from '../../lib/time'
+import { hoursBetween, isAfter, md, mdhm } from '../../lib/time'
 import { cls } from '../../lib/ui'
 import { EventCard } from './EventCard'
 import { FactorList } from './FactorList'
@@ -55,8 +55,10 @@ export function Agent2({ cs, sim, clock, onJump }: Props) {
     const last = lastAt(cs, code, at)
     return { code, item, atEvent: sameDraw(cs, ev, code), last, lim: K_RECOVER * uln(cs, code) }
   })
-  const again = rows.some(r => r.last && isAfter(r.last.charttime, ev.drawn))
+  const rec = recoveryAt(cs, ev, at)
   const over = rows.filter(r => r.last && r.last.value >= r.lim)
+  const dt = cs.outcome.deathTime
+  const deathAfterOut = !!dt && isAfter(dt, cs.icuOut)
 
   return (
     <div className="ad">
@@ -117,14 +119,21 @@ export function Agent2({ cs, sim, clock, onJump }: Props) {
           <span className="muted course-name">{short(it.name)} 경과</span>
         </div>
         <ul className="track">
-          {!again ? (
-            <li>첫 이상 뒤 아직 다시 잰 값이 없음 · 이대로 퇴실하면 판정 불가</li>
+          {!rec.judged ? (
+            <li>첫 이상 뒤 다시 재지 않은 항목: {rec.notRemeasured.map(c => short(itemOf(cs, c).name)).join(', ')} · {done ? '판정 불가' : '이대로 퇴실하면 판정 불가'}</li>
           ) : over.length ? (
             <li>아직 2배 이상: {over.map(r => short(r.item.name)).join(', ')} · {done ? '미회복' : '이대로 퇴실하면 미회복'}</li>
           ) : (
             <li className="ok">세 항목 모두 2배 미만 · {done ? '회복' : '이대로 퇴실하면 회복'}</li>
           )}
-          {done && <li>ICU 퇴실 {mdhm(cs.icuOut)} · {cs.outcome.icuDeath ? 'ICU 사망' : `생존 퇴실 (${cs.outcome.dischargeTo})`}</li>}
+          {done && (
+            <li>
+              {cs.outcome.icuDeath && !deathAfterOut
+                ? `ICU 사망 ${mdhm(cs.icuOut)}`
+                : `ICU 퇴실 ${mdhm(cs.icuOut)} · 생존 퇴실 (${cs.outcome.dischargeTo})`}
+              {deathAfterOut && ` → ${mdhm(dt!)} 사망 (퇴실 뒤 ${Math.round(hoursBetween(cs.icuOut, dt!))}시간, ${cs.outcome.icuDeath ? 'ICU 사망으로 셈' : 'ICU 사망 아님'})`}
+            </li>
+          )}
           {done && (
             <li className="final">
               실제 종료 상태 <b>{actual ? END_STATES.find(s => s.key === actual)!.label : '판정 불가'}</b>

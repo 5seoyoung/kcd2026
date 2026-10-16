@@ -5,7 +5,7 @@
 import type { AgentRun, CaseData, CauseCall, LabResult, QaAnswer, QaMsg, QaSource, Ref } from '../types'
 import type { Sim } from '.'
 import { CAUSE_WIKI, causeName } from './causes'
-import { activeAt, EVENT_CODES, isKnown, itemOf, K_RECOVER, lastAt, RULE_THRESHOLD, seriesAt, uln } from '../lib/events'
+import { activeAt, isKnown, itemOf, K_RECOVER, recoveryAt, RULE_THRESHOLD, seriesAt, uln } from '../lib/events'
 import { fmtNum } from '../lib/lab'
 import { rateAt } from '../lib/ui'
 import { hm, hoursBetween, isAfter, md, mdhm } from '../lib/time'
@@ -203,18 +203,17 @@ const QA: QaDef[] = [
     answer: c => {
       const out = !isAfter(c.cs.icuOut, c.clock)
       const at = out ? c.cs.icuOut : c.clock
-      const last = EVENT_CODES.map(code => lastAt(c.cs, code, at)).filter((r): r is LabResult => !!r)
+      const { judged, last, notRemeasured } = recoveryAt(c.cs, c.sim.first!, at)
       const over = last.filter(r => r.value >= K_RECOVER * uln(c.cs, r.code))
-      const again = last.some(r => isAfter(r.charttime, c.sim.first!.drawn))
       const name = (r: LabResult) => short(itemOf(c.cs, r.code).name)
-      const verdict = !again
-        ? '첫 이상 뒤 다시 잰 값이 없어 아직 판정할 수 없습니다.'
+      const verdict = !judged
+        ? `첫 이상 뒤 다시 재지 않은 항목: ${notRemeasured.map(code => short(itemOf(c.cs, code).name)).join(', ')}. ${out ? '판정 불가입니다' : '이대로 퇴실하면 판정 불가입니다'}.`
         : over.length
           ? `아직 2배 이상인 항목: ${over.map(name).join(', ')}. ${out ? '미회복으로 판정했습니다' : '지금 퇴실하면 미회복입니다'}.`
           : `세 항목 모두 2배 미만이라 ${out ? '회복으로 판정했습니다' : '지금 퇴실하면 회복입니다'}.`
       return {
         text: [
-          '회복은 ICU 퇴실 때 마지막 ALT, ALP, 총빌리가 모두 기록 상한의 2배 미만인 경우입니다. 첫 이상 뒤 다시 재지 않으면 판정 불가입니다.',
+          '회복은 ICU 퇴실 때 마지막 ALT, ALP, 총빌리가 모두 기록 상한의 2배 미만인 경우입니다. 첫 이상 뒤 세 항목 중 다시 재지 않은 항목이 있으면 판정 불가입니다.',
           `${out ? '퇴실 때' : '지금'} 마지막 값: ${last.map(r => `${name(r)} ${fmtNum(r.value, itemOf(c.cs, r.code).dp)} (${(r.value / uln(c.cs, r.code)).toFixed(1)}배, ${md(r.charttime)})`).join(', ')}.`,
           verdict,
         ],

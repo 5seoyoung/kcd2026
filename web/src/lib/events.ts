@@ -98,15 +98,19 @@ export function normalAt(cs: CaseData, t: string): { ok: boolean; why?: string }
 }
 
 /**
- * ICU 퇴실 때 판정: 사건 뒤 다시 잰 값이 있어야 판정할 수 있고 (없으면 판정 불가),
- * 퇴실 때 마지막 ALT, ALP, 총빌리가 모두 2배 미만이면 회복.
+ * 기준 시각 (퇴실이면 퇴실 시각) 까지의 회복 판정 (MODEL_CARD): 사건 뒤 ALT, ALP, 총빌리를 세 항목 모두 다시 재야 판정할 수 있고
+ * (한 항목이라도 다시 재지 않았으면 판정 불가), 마지막 값이 모두 2배 미만이면 회복.
  */
-export function dischargeOf(cs: CaseData, ev: LiverEvent): { judged: boolean; recovered: boolean; last: LabResult[] } {
-  const last = EVENT_CODES.map(code => lastAt(cs, code, cs.icuOut)).filter((r): r is LabResult => !!r)
-  const judged = last.some(r => isAfter(r.charttime, ev.drawn))
+export function recoveryAt(cs: CaseData, ev: LiverEvent, t: string): { judged: boolean; recovered: boolean; last: LabResult[]; notRemeasured: string[] } {
+  const last = EVENT_CODES.map(code => lastAt(cs, code, t)).filter((r): r is LabResult => !!r)
+  const notRemeasured = EVENT_CODES.filter(code => !last.some(r => r.code === code && isAfter(r.charttime, ev.drawn)))
+  const judged = notRemeasured.length === 0
   const recovered = judged && last.every(r => r.value < K_RECOVER * uln(cs, r.code))
-  return { judged, recovered, last }
+  return { judged, recovered, last, notRemeasured }
 }
+
+/** ICU 퇴실 때 판정 */
+export const dischargeOf = (cs: CaseData, ev: LiverEvent) => recoveryAt(cs, ev, cs.icuOut)
 
 export function endStateOf(recovered: boolean, dead: boolean): EndState {
   return recovered ? (dead ? 'rec-dead' : 'rec-alive') : dead ? 'norec-dead' : 'norec-alive'

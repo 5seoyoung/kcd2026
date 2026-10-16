@@ -1,6 +1,6 @@
 # 간 검사 이상 에이전트 화면
 
-EMR 안에서 에이전트 네 개와 질의응답이 시간 흐름에 따라 작동하는 모습을 보여 주는 정적 웹 화면입니다 (KCD 2026 포스터용). 환자와 기록은 모두 손으로 만든 가상 자료입니다. 에이전트 출력은 MIMIC 연구원의 모델 패키지 (MIMIC-IV 학습, 고정) 를 이 가상 사례에 그대로 적용한 결과이고 (`npm run models`), 지식 근거는 근거 위키 (`../wiki_kb`, 원문 13편으로 만든 한국어 위키) 에서 가져옵니다.
+EMR 안에서 에이전트 네 개와 질의응답이 시간 흐름에 따라 작동하는 모습을 보여 주는 정적 웹 화면입니다 (KCD 2026 포스터용). 환자와 기록은 모두 손으로 만든 가상 자료입니다 (시연 사례 5명, 아래 표). 에이전트 출력은 MIMIC 연구원의 모델 패키지 (MIMIC-IV 학습, 고정) 를 이 가상 사례에 그대로 적용한 결과이고 (`npm run models`), 지식 근거는 근거 위키 (`../wiki_kb`, 원문 13편으로 만든 한국어 위키) 에서 가져옵니다.
 
 ## 실행
 
@@ -27,6 +27,18 @@ npm run wiki     # ../wiki_kb 가 바뀌면 public/wiki/kb.json 을 다시 만�
 
 모든 정의와 상수는 `src/lib/events.ts` 에 있습니다. 바탕 문서는 `docs/liver_agent_7site_summary.md` 입니다 (공개 저장소에는 올리지 않음).
 
+## 시연 사례
+
+| # | 환자 (병상) | 유형 | 종료 상태 | 발생 예측 |
+|---|---|---|---|---|
+| c1 | 한○수 (CCU-01) | 대량 간세포 손상 (심정지 뒤 저산소성 간염) | 회복 · ICU 사망 | 돎 |
+| c2 | 윤○자 (SICU-05) | 쇼크 간 (복막염 수술 뒤 패혈성 쇼크) | 미회복 · ICU 사망 | 돎 |
+| c3 | 강○철 (MICU-03) | 기저 간질환형 (알코올 간경변, 정맥류 출혈) | 미회복 · 생존 | 응급실 검사로 입실 뒤 몇 시간 돎 |
+| c4 | 서○희 (MICU-09) | 담즙정체형 (총담관 결석, 담관염) | 회복 · 생존 | 응급실 검사로 입실 뒤 몇 시간 돎 |
+| c5 | 임○호 (SICU-08) | 관찰 중 새로 발생 (문합부 누출, 59시간 정상 뒤) | 판정 불가 · 생존 | 돎 (안정기 확신 낮음) |
+
+사례 파일은 `src/data/cases/` 에 있고, 공통 도구 (`kit.ts`: D0 기준 날짜, 검사 묶음, 투약, 매시간 활력징후) 로 만듭니다. 출력은 실제 모델이 낸 그대로이며 사례 설계 때 기대한 결과와 다를 수 있습니다.
+
 ## 화면 흐름
 
 위쪽 재생 버튼을 누르면 ICU 입실부터 퇴실까지 한 시간씩 넘어갑니다. 시간선을 누르거나 끌어도 기준 시각이 바뀝니다.
@@ -47,8 +59,8 @@ npm run wiki     # ../wiki_kb 가 바뀌면 public/wiki/kb.json 을 다시 만�
 |---|---|
 | `src/types.ts` | 자료 형식. 사례 자료, 사건, 에이전트 출력 (`A1Point`, `A2Output`, `A4Forecast`, `AgentRun`, `CauseCall`, `ModelOutputs`), 질의응답 (`QaMsg`) |
 | `src/lib/events.ts` | 정의와 상수. 공개 시각, 사건 찾기, 정상 구간, 퇴실 때 판정, 기준 시각에 보이는 기록 |
-| `src/data/case01.ts` | 가상 사례 1 (쇼크 뒤 허혈성 손상, 회복 · 생존). 입실부터 퇴실까지 검사, 투약, 활력징후, 배양, 처치 |
-| `src/data/runs.ts` | 사례 1 의 원인 추정 실행 기록: 패키지 원인 규칙 출력 + 근거 위키 지침 근거 + 도구 호출 단계 |
+| `src/data/cases/` | 시연 사례 5명 (`c1.ts` ~ `c5.ts`) 과 공통 도구 `kit.ts`. 입실 전 응급실·병동 검사부터 퇴실까지 검사, 투약, 활력징후, 배양, 처치, 과거력 |
+| `src/data/runs.ts` | 사례마다 원인 추정 실행 기록: 패키지 원인 규칙 출력 + 근거 위키 지침 근거 + 도구 호출 단계 + 화면 표시 확신 |
 | `src/data/modelrun.ts`, `src/data/model/` | 모델 패키지 적용 출력과 화면 형식 변환 |
 | `model-bridge/` | 사례 내보내기와 모델 실행 (`npm run models`) |
 | `src/data/causes.ts` | 원인 범주 10개 (임상의 선생님 기준) |
@@ -81,7 +93,9 @@ uv venv --python 3.11 .venv-models && uv pip install --python .venv-models/bin/p
 KCD_PYTHON=.venv-models/bin/python npm run models     # 패키지 위치가 다르면 KCD_MODEL_PACKAGE=<폴더>
 ```
 
-- 화면 정의와 모델 출력의 첫 이상 시각이 다르면 `runs.ts` 가 오류를 냅니다 (사례를 바꾸면 다시 실행).
+- 화면 정의와 모델 출력의 첫 이상 시각이 다르면 원인 추정이 비고 콘솔에 오류가 납니다 (사례를 바꾸면 다시 실행).
+- 발생 예측과 궤적은 입실 시각부터 돕니다. 같은 입원의 입실 전 응급실·병동 검사도 입력에 들어가기 때문입니다 (MODEL_CARD).
+- 과거력 (`history`) 은 이전 입원의 진단 코드로 넘기고, 패키지의 `history_flags` 가 6가지 과거력으로 바꿉니다.
 - 패키지에 경보 운영 기준이 없어 발생 예측 경보 30% 는 화면 설정입니다 (`src/lib/events.ts` 의 `A1_THRESHOLD`).
 - 임상 표현형 군집은 개발 때 불안정 (부트스트랩 ARI 0.75 미만) 이라 패키지 규칙대로 쓰지 않습니다.
 - 사건 정의의 2·3·4배 민감도 모델 (`agent3_gbm_2x` 등) 과 48시간 경로 모델 (`agent2_gbm`) 은 화면에 쓰지 않습니다.
@@ -110,8 +124,8 @@ GitHub Pages 화면에서 이 컴퓨터의 서버를 부르면 크롬이 로컬 
 
 ## 사례 추가
 
-1. `src/data/caseNN.ts` 를 `case01.ts` 와 같은 형식으로 만듭니다 (`icuIn`, `icuOut`, `admitTime`, `outcome` 필수).
-2. `model-bridge/export-case.ts` 와 `npm run models` 에 사례를 더해 모델 출력을 만들고, `modelrun.ts`, `runs.ts`, `models.ts` 에 연결합니다.
-3. `src/data/index.ts` 의 `cases` 에 추가하고, `patients.ts` 의 해당 환자에 `caseId` 를 붙입니다.
+1. `src/data/cases/cN.ts` 를 다른 사례와 같은 형식으로 만들고 (`icuIn`, `icuOut`, `admitTime`, `outcome` 필수, 과거력은 `history`) `cases/index.ts` 의 `CASES` 에 더합니다.
+2. `patients.ts` 에 환자를 더하고 `caseId` 를 붙입니다.
+3. `npm run models` 로 모델 출력 (`src/data/model/cN.json`) 을 만듭니다. 원인 추정, 종료 상태, 군집은 이 출력에서 자동으로 연결됩니다.
 
 근거의 `ref` (`{ tab, row, col | from, to }`) 가 원자료 탭의 행 id 와 맞아야 '원자료 ›' 나 질의응답 출처를 눌렀을 때 그 칸으로 이동합니다.

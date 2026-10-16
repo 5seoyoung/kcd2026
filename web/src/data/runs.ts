@@ -1,40 +1,21 @@
-// 사례 1 의 에이전트 3 (원인 추정) 실행 기록. 모델 패키지의 원인 규칙 (rule_agent.py, 학습 없음) 을 첫 이상 시점의
-// 48시간 스냅숏에 적용한 출력 (model-bridge → model/c01.json) 을 화면 형식으로 바꾸고, 범주마다 근거 위키의 지침 근거를 붙인다.
-// 점수와 근거는 규칙 모델 출력 그대로이고, 여기서 바꾸지 않는다.
-import type { AgentRun, AgentStep, CauseCall, Evidence, GuideLine, SuspectDrug } from '../types'
-import { case01 } from './case01'
+// 에이전트 3 (원인 추정) 실행 기록. 모델 패키지의 원인 규칙 (rule_agent.py, 학습 없음) 을 첫 이상 시점의
+// 48시간 스냅숏에 적용한 출력 (model-bridge → model/<사례>.json) 을 화면 형식으로 바꾸고, 범주마다 근거 위키의 지침 근거를 붙인다.
+// 점수와 인용 근거는 규칙 모델 출력 그대로이고, 여기서 바꾸지 않는다. 도구 호출 단계 문장, 의심 약제 표, 확신 표시는 자료에서 계산한다.
+import type { AgentRun, AgentStep, CaseData, CauseCall, Evidence, GuideLine, SuspectDrug } from '../types'
+import { CASES } from './cases'
 import { CAUSE_WIKI, causeName, EVIDENCE_MAP } from './causes'
 import { CAUSE_NO, evidenceOf, model1Of, modelRun } from './modelrun'
-import { firstEvent, K_FIRST, RULE_THRESHOLD, reported, sameDraw, rRatio, uln } from '../lib/events'
+import { firstEvent, K_FIRST, reported, RULE_THRESHOLD, rRatio, sameDraw, uln } from '../lib/events'
 import { fmtNum } from '../lib/lab'
-import { hm, hoursBetween, isAfter, mdhm } from '../lib/time'
+import { addHours, hm, hoursBetween, isAfter, mdhm } from '../lib/time'
 
-const run = modelRun(case01.id)!
-const a3 = run.a3!
-const ev = firstEvent(case01, K_FIRST)!
-if (run.first_event?.t0 !== ev.t0) throw new Error(`모델 출력의 첫 이상 (${run.first_event?.t0}) 과 화면 정의 (${ev.t0}) 가 다릅니다. npm run models 로 다시 만드세요`)
-const { t0, drawn } = ev
-
-const before = (t: string) => !isAfter(t, t0)
-const order = (id: string) => case01.mar.find(o => o.id === id)!
-const lab = (code: string) => sameDraw(case01, ev, code)!
-const x = (code: string, v: number) => (v / uln(case01, code)).toFixed(1)
-const lag = (from: string) => {
-  const h = hoursBetween(from, drawn)
-  return h >= 24 ? `${(h / 24).toFixed(1)}일` : `${h.toFixed(1)}시간`
-}
-const vitals = case01.vitals.filter(v => before(v.time) && !isAfter(addH(t0, -48), v.time))
-function addH(t: string, h: number) {
-  const d = new Date(Date.parse(t.replace(' ', 'T') + ':00Z') + h * 3_600_000)
-  return d.toISOString().slice(0, 16).replace('T', ' ')
-}
-const mapMin = Math.min(...vitals.map(v => v.map))
-const neMax = Math.max(...order('NE').admins.filter(a => before(a.time)).map(a => a.rate ?? 0))
-const lacMax = case01.labs.filter(r => r.code === 'LAC' && reported(r, t0)).reduce((a, b) => (b.value > a.value ? b : a))
-const alt = lab('ALT')
-const ast = lab('AST')
-const R = rRatio(case01, ev)!
-const amino = Math.max(alt.value / uln(case01, 'ALT'), ast.value / uln(case01, 'AST'))
+/** rule_agent.py 의 간독성 약 목록 (이름에 들어 있으면 해당) */
+const HEPATOTOXIC = ['acetaminophen', 'ceftriaxone', 'amoxicillin', 'clavulanate', 'piperacillin', 'isoniazid', 'rifampin',
+  'valpro', 'phenytoin', 'amiodarone', 'azithromycin', 'fluconazole', 'voriconazole', 'ketoconazole',
+  'methotrexate', 'atorvastatin', 'simvastatin', 'allopurinol', 'carbamazepine', 'nitrofurantoin',
+  'sulfamethoxazole', 'trimethoprim', 'oxacillin', 'nafcillin', 'tmp', 'linezolid', 'propofol']
+const PRESSORS = ['norepinephrine', 'epinephrine', 'vasopressin', 'phenylephrine', 'dopamine']
+const KO: Record<string, string> = { norepinephrine: '노르에피네프린', epinephrine: '에피네프린', vasopressin: '바소프레신', phenylephrine: '페닐에프린', dopamine: '도파민' }
 
 // 근거 위키 (wiki_kb) 의 '원인 10개 근거 지도' 에서 범주마다 옮긴 지침 근거와 근거 공백. 문장과 인용은 위키 그대로
 const g = (cause: number, text: string, cite: string): GuideLine => ({ text, cite, page: EVIDENCE_MAP, heading: CAUSE_WIKI[cause].section })
@@ -97,90 +78,153 @@ const RULE: Record<number, string> = {
   10: '근육 기원 (CK 5× 이상, AST ≥ 0.8×ALT) 1.5, 기저 간질환 과거력 1, 설명되지 않는 간세포형 1',
 }
 
-const calls: CauseCall[] = Object.entries(a3.flags)
-  .map(([code, f]) => {
-    const cause = CAUSE_NO[code]
+function buildRun(cs: CaseData): AgentRun | undefined {
+  const run = modelRun(cs.id)
+  const a3 = run?.a3
+  const ev = firstEvent(cs, K_FIRST)
+  if (!run || !a3 || !ev) return undefined
+  if (run.first_event?.t0 !== ev.t0) {
+    console.error(`${cs.id}: 모델 출력의 첫 이상 (${run.first_event?.t0}) 과 화면 정의 (${ev.t0}) 가 다릅니다. npm run models 로 다시 만드세요`)
+    return undefined
+  }
+  const { t0, drawn } = ev
+  const from48 = addHours(t0, -48)
+  const inWin = (t: string) => !isAfter(t, t0) && !isAfter(from48, t)
+  const x = (code: string) => {
+    const r = sameDraw(cs, ev, code)
+    return r ? r.value / uln(cs, code) : null
+  }
+  const f1 = (v: number | null) => (v === null ? '–' : v.toFixed(1))
+  const R = rRatio(cs, ev)
+  const amino = Math.max(x('ALT') ?? 0, x('AST') ?? 0)
+  const vit = cs.vitals.filter(v => inWin(v.time))
+  const mapMin = vit.length ? Math.min(...vit.map(v => v.map)) : null
+  const lacs = cs.labs.filter(r => r.code === 'LAC' && reported(r, t0) && inWin(r.charttime))
+  const lacMax = lacs.length ? Math.max(...lacs.map(r => r.value)) : null
+  const pressors = cs.mar
+    .filter(o => PRESSORS.some(p => o.drug.toLowerCase() === p) && o.admins.some(a => a.status === 'given' && inWin(a.time)))
+    .map(o => {
+      const rates = o.admins.filter(a => !isAfter(a.time, t0) && a.rate).map(a => a.rate!)
+      return `${KO[o.drug.toLowerCase()]}${rates.length ? ` 최대 ${Math.max(...rates)}` : ''}`
+    })
+  // 간독성 목록의 약 가운데 48시간 안 투여 기록 (지속 주입은 규칙이 보지 않음)
+  const hepato = cs.mar.filter(o => !o.infusion && HEPATOTOXIC.some(h => o.drug.toLowerCase().includes(h)))
+    .map(o => ({ o, given: o.admins.filter(a => a.status === 'given' && inWin(a.time)) }))
+    .filter(d => d.given.length)
+
+  const calls: CauseCall[] = Object.entries(a3.flags)
+    .map(([code, f]) => {
+      const cause = CAUSE_NO[code]
+      return {
+        cause,
+        score: f.assessable ? f.score : null,
+        rule: RULE[cause],
+        support: f.support.map(s => evidenceOf(cs, s)),
+        against: (f.assessable ? f.against : []).map<Evidence>(text => ({ text })),
+        missing: f.assessable ? [] : f.against.map<Evidence>(text => ({ text })),
+        guide: GUIDE[cause],
+      }
+    })
+    .sort((a, b) => a.cause - b.cause)
+  const hits = calls.filter(c => c.score !== null && c.score >= RULE_THRESHOLD).sort((a, b) => b.score! - a.score!)
+  const score = (cause: number) => calls.find(c => c.cause === cause)!.score
+  // 과거력 근거 (이전 입원 진단) 는 이번 입원 원자료 탭에 없으므로 대조에서 따로 셈
+  const rawSupports = Object.values(a3.flags).flatMap(f => f.support)
+  const histN = rawSupports.filter(s => (s.analyte_or_label ?? '').startsWith('history_')).length
+  const supports = calls.flatMap(c => c.support).filter(s => !/이전 입원/.test(s.text))
+  const matched = supports.filter(s => s.ref).length
+  const m1 = model1Of(run)
+  const missingCore = /최근 측정 없음/.test(a3.uncertainty)
+  const diliCited = new Set(a3.flags.dili?.support.map(s => (s.analyte_or_label ?? '').toLowerCase()) ?? [])
+
+  const steps: AgentStep[] = [
+    {
+      id: 's1', tool: 'build_snapshot', title: '사례 자료 만들기 (48시간 스냅숏)', ms: 900,
+      summary: `t0 = ${mdhm(t0)} (${ev.item.name.split(' (')[0]} 공개 시각, 채혈 ${hm(drawn)}). t0 까지 공개된 기록만, 48시간 창`,
+      details: [`검사 ${a3.snapshot.labs}종 (항목별 마지막 값), 활력징후·주입·투약 기록 ${a3.snapshot.context}건 (최근 150건까지)`],
+    },
+    {
+      id: 's2', tool: 'detect_event', title: '사건 확인', ms: 600,
+      summary: `${ev.item.name.split(' (')[0]} ${fmtNum(ev.result.value, ev.item.dp)} ${ev.item.unit}, 기록 상한 ${ev.item.high} 의 ${f1(ev.result.value / ev.item.high!)}배 (첫 이상) → ${ev.group}`,
+      details: [ev.prev ? `직전 값 ${fmtNum(ev.prev.value, ev.item.dp)} (${mdhm(ev.prev.charttime)})` : '직전 48시간 안 같은 항목 값 없음', 'ICU 입실 전 같은 입원에서 2배 이상인 기록 없음 → 분석 대상'],
+    },
+    {
+      id: 's3', tool: 'injury_pattern', title: '손상 패턴 (ACG 2017 R 비)', ms: 500,
+      summary: `R 비 ${R === null ? '계산 불가' : R.toFixed(1)} → ${a3.pattern ?? '분류 불가'}. ALT ${f1(x('ALT'))}×, AST ${f1(x('AST'))}×, ALP ${f1(x('ALP'))}×, 총빌리 ${f1(x('TB'))}×ULN`,
+    },
+    {
+      id: 's4', tool: 'snapshot_context', title: '스냅숏 속 혈역학·투약', ms: 800,
+      summary: [
+        mapMin !== null ? `MAP 최저 ${mapMin}` : 'MAP 기록 없음',
+        pressors.length ? pressors.join(', ') : '승압제 없음',
+        lacMax !== null ? `젖산 최고 ${fmtNum(lacMax, 1)}` : '젖산 측정 없음',
+        hepato.length ? `간독성 목록의 약 ${hepato.map(d => d.o.drug).join(', ')}` : '간독성 목록의 약 없음',
+      ].join('. '),
+    },
+    {
+      id: 's5', tool: 'rule_agent', title: `원인 규칙 (${a3.model})`, ms: 1000,
+      summary: `${RULE_THRESHOLD.toFixed(1)} 이상 ${hits.length}개: ${hits.map(c => `${causeName(c.cause)} ${c.score!.toFixed(1)}`).join(', ') || '없음'}. 담낭염은 판단 불가${a3.abstain ? '. 판단 보류' : ''}`,
+      details: score(1) === 0 && amino < 5 ? [`Hypoxic hepatitis 0: 규칙은 AST·ALT 5×ULN 부터 보는데 첫 이상 때 최고 ${amino.toFixed(1)}×ULN`] : undefined,
+    },
+    {
+      id: 's6', tool: 'query_wiki', title: '근거 위키 조회', ms: 900,
+      summary: `범주마다 진단 기준과 근거 공백을 원인 10개 근거 지도에서 가져옴 (${Object.values(GUIDE).flat().length}줄, 원문 13편). 담낭염 진단 기준 (TG18) 은 위키에 없음`,
+    },
+    {
+      id: 's7', tool: 'query_model1', title: '간 검사 이상 패턴 군집 (모델 1)', ms: 700,
+      summary: m1 ? `${m1.cluster}, 확신도 ${m1.confidence.toFixed(2)}, 개발 사건의 ${Math.round(m1.share * 100)}%. 원인 판정에는 넣지 않음` : '군집 출력 없음',
+    },
+    {
+      id: 's8', tool: 'verify_source', title: '원자료 대조', ms: 600,
+      summary: `규칙이 인용한 근거 ${supports.length}개 중 ${matched}개가 원자료 기록과 바로 이어짐${histN ? `, 과거력 ${histN}개는 이전 입원 진단` : ''}`,
+    },
+  ]
+
+  const suspectDrugs: SuspectDrug[] = hepato.map(({ o, given }) => {
+    const first = o.admins.find(a => a.status === 'given')!
+    const h = hoursBetween(first.time, drawn)
     return {
-      cause,
-      score: f.assessable ? f.score : null,
-      rule: RULE[cause],
-      support: f.support.map(s => evidenceOf(case01, s)),
-      against: (f.assessable ? f.against : []).map<Evidence>(text => ({ text })),
-      missing: f.assessable ? [] : f.against.map<Evidence>(text => ({ text })),
-      guide: GUIDE[cause],
+      drug: `${o.drug} (${o.route})`,
+      latency: h >= 24 ? `${(h / 24).toFixed(1)}일` : `${Math.max(0, h).toFixed(1)}시간`,
+      last: mdhm(given.at(-1)!.time),
+      cited: diliCited.has(o.drug.toLowerCase()),
+      ref: { tab: 'mar', row: o.id },
     }
   })
-  .sort((a, b) => a.cause - b.cause)
 
-const hits = calls.filter(c => c.score !== null && c.score >= RULE_THRESHOLD).sort((a, b) => b.score! - a.score!)
-const supports = calls.flatMap(c => c.support)
-const matched = supports.filter(s => s.ref).length
-const hypoxic = calls.find(c => c.cause === 1)!
-const m1 = model1Of(run)
+  // 확인하면 좋을 검사: 규칙 결과에서 비었거나 '의심' 에 머문 범주를 따라
+  const tests: { name: string; why: string }[] = []
+  if (score(1) === 0 && amino >= 3 && amino < 5 && mapMin !== null && mapMin < 65) tests.push({ name: '12~24시간 뒤 AST, ALT, LDH 재측정', why: `저관류 (MAP 최저 ${mapMin}) 뒤 5×ULN 을 넘는지. 규칙은 5×ULN 부터 Hypoxic hepatitis 를 봄` })
+  if (hits.some(c => c.cause === 6)) tests.push({ name: '복부 초음파 판독', why: 'TG18 C (담관 확장) 영상 소견이 없어 담관염은 의심 수준까지만' })
+  if (hits.some(c => c.cause === 4)) tests.push({ name: '투약 시작일과 잠복기 확인 (RUCAM)', why: suspectDrugs.length > 1 ? `후보 약이 ${suspectDrugs.length}개라 어느 약인지는 판단 보류. 규칙은 최근 두 약만 인용` : '규칙은 48시간 안 투약 기록만 보고 잠복기는 보지 않음' })
+  if (score(2) === 0 && !cs.labs.some(r => r.code === 'BNP')) tests.push({ name: 'NT-proBNP, 심초음파 판독', why: '울혈성 간병증 규칙에 필요한 심부전 근거가 자료에 없음' })
+  if ((score(8) ?? 0) > 0 && !cs.labs.some(r => r.code === 'HAPTO')) tests.push({ name: '합토글로빈, 말초혈액 도말', why: '용혈 점수 일부를 받았지만 합토글로빈이 없음' })
 
-const steps: AgentStep[] = [
-  {
-    id: 's1', tool: 'build_snapshot', title: '사례 자료 만들기 (48시간 스냅숏)', ms: 900,
-    summary: `t0 = ${mdhm(t0)} (ALT 공개 시각, 채혈 ${hm(drawn)}). t0 까지 공개된 기록만, 48시간 창`,
-    details: [`검사 ${a3.snapshot.labs}종 (항목별 마지막 값), 활력징후·주입·투약 기록 ${a3.snapshot.context}건 (최근 150건까지)`],
-  },
-  {
-    id: 's2', tool: 'detect_event', title: '사건 확인', ms: 600,
-    summary: `ALT ${alt.value} IU/L, 기록 상한 ${ev.item.high} 의 ${x('ALT', alt.value)}배 (첫 이상). 직전 값 ${ev.prev!.value} (${mdhm(ev.prev!.charttime)}) 는 2배 미만 → ${ev.group}`,
-    details: ['ICU 입실 전 같은 입원에서 2배 이상인 기록 없음 → 분석 대상'],
-  },
-  {
-    id: 's3', tool: 'injury_pattern', title: '손상 패턴 (ACG 2017 R 비)', ms: 500,
-    summary: `R 비 ${R.toFixed(1)} → ${a3.pattern ?? '계산 불가'}. AST ${x('AST', ast.value)}×, ALT ${x('ALT', alt.value)}×ULN`,
-  },
-  {
-    id: 's4', tool: 'snapshot_context', title: '스냅숏 속 혈역학·투약', ms: 800,
-    summary: `MAP 최저 ${mapMin}, 노르에피네프린 최대 ${neMax}, 젖산 최고 ${fmtNum(lacMax.value, 1)}. 간독성 목록의 약: 피페라실린/타조박탐, 아세트아미노펜, 아미오다론`,
-  },
-  {
-    id: 's5', tool: 'rule_agent', title: `원인 규칙 (${a3.model})`, ms: 1000,
-    summary: `${RULE_THRESHOLD.toFixed(1)} 이상 ${hits.length}개: ${hits.map(c => `${causeName(c.cause)} ${c.score!.toFixed(1)}`).join(', ') || '없음'}. 담낭염은 판단 불가`,
-    details: hypoxic.score === 0 ? [`Hypoxic hepatitis 0: 규칙은 AST·ALT 5×ULN 부터 보는데 지금 최고 ${amino.toFixed(1)}×ULN`] : undefined,
-  },
-  {
-    id: 's6', tool: 'query_wiki', title: '근거 위키 조회', ms: 900,
-    summary: `범주마다 진단 기준과 근거 공백을 원인 10개 근거 지도에서 가져옴 (${Object.values(GUIDE).flat().length}줄, 원문 13편). 담낭염 진단 기준 (TG18) 은 위키에 없음`,
-  },
-  {
-    id: 's7', tool: 'query_model1', title: '간 검사 이상 패턴 군집 (모델 1)', ms: 700,
-    summary: m1 ? `${m1.cluster}, 확신도 ${m1.confidence.toFixed(2)}, 개발 사건의 ${Math.round(m1.share * 100)}%. 원인 판정에는 넣지 않음` : '군집 출력 없음',
-  },
-  {
-    id: 's8', tool: 'verify_source', title: '원자료 대조', ms: 600,
-    summary: `규칙이 인용한 근거 ${supports.length}개 중 ${matched}개가 원자료 기록과 바로 이어짐`,
-  },
-]
+  // 화면 표시 확신: 규칙의 판단 보류, 핵심 검사 누락, 함께 해당한 범주 수로 정함 (규칙 모델의 출력은 아님)
+  const confidence: AgentRun['confidence'] = a3.abstain
+    ? { level: '판단 보류', why: '규칙 점수가 약하거나 해당 범주가 없음' }
+    : missingCore
+      ? { level: '낮음', why: '첫 이상 때 ALT, ALP, 총빌리 중 최근 측정이 빠진 항목이 있음' }
+      : hits.length >= 2
+        ? { level: '낮음', why: `${hits.length}개 범주가 함께 해당 (과다 판정일 수 있음)` }
+        : hits[0] && hits[0].score! >= 2
+          ? { level: '높음', why: '한 범주만 해당하고 점수가 높으며 핵심 검사가 있음' }
+          : { level: '중간', why: '한 범주만 해당하지만 점수가 기준 근처' }
 
-const suspectDrugs: SuspectDrug[] = [
-  { drug: 'Amiodarone (IV)', latency: lag(order('AMIO').start), hepatotox: '정맥 투여 직후 급성 손상 보고 있음', pattern: '간세포형, 혼합형인 지금과 일부 맞음', ref: { tab: 'mar', row: 'AMIO' } },
-  { drug: 'Piperacillin/Tazobactam', latency: lag(order('PIP').start), hepatotox: '드묾', pattern: '주로 담즙정체형, 안 맞음', ref: { tab: 'mar', row: 'PIP' } },
-  { drug: 'Acetaminophen', latency: `${lag(order('APAP').start)} (2회)`, hepatotox: '용량 의존', pattern: '650 mg 2회로 용량이 낮음', ref: { tab: 'mar', row: 'APAP' } },
-]
-
-// 확인하면 좋을 검사: 규칙 결과에서 비거나 '의심' 에 머문 범주를 따라
-const tests: { name: string; why: string }[] = []
-if (hypoxic.score === 0 && mapMin < 65) tests.push({ name: '12~24시간 뒤 AST, ALT, LDH 재측정', why: `저관류 (MAP 최저 ${mapMin}) 뒤 5×ULN 을 넘는지. 규칙은 5×ULN 부터 Hypoxic hepatitis 를 봄` })
-if (hits.some(c => c.cause === 6)) tests.push({ name: '복부 초음파', why: 'TG18 C (담관 확장) 영상이 없어 담관염은 의심 수준까지만' })
-if (hits.some(c => c.cause === 4)) tests.push({ name: '투약 시작일과 잠복기 확인 (RUCAM)', why: '규칙은 48시간 안 투약 기록만 보고 잠복기는 보지 않음' })
-if (calls.find(c => c.cause === 2)!.score === 0) tests.push({ name: 'NT-proBNP, 심초음파', why: '울혈성 간병증 규칙에 필요한 심부전 근거가 자료에 없음' })
-
-export const runs: AgentRun[] = [
-  {
-    caseId: 'c01', handwritten: false, ruleVersion: a3.model, llm: '없음 (규칙 기준 모델)',
+  return {
+    caseId: cs.id, handwritten: false, ruleVersion: a3.model, llm: '없음 (규칙 기준 모델)',
     steps,
     summary: [
       `원인 규칙 (${a3.model}) 결과 ${hits.map(c => `${causeName(c.cause)} ${c.score!.toFixed(1)}`).join(', ') || '해당 범주 없음'}.`,
-      `R 비 ${R.toFixed(1)} (${a3.pattern}).`,
-      hypoxic.score === 0 ? `Hypoxic hepatitis 는 규칙이 AST·ALT 5×ULN 부터 보는데 첫 이상 때 최고 ${amino.toFixed(1)}×ULN 이라 점수가 없습니다.` : '',
+      R !== null ? `R 비 ${R.toFixed(1)} (${a3.pattern}).` : '',
+      score(1) === 0 && amino < 5 && amino >= 3 ? `Hypoxic hepatitis 는 규칙이 AST·ALT 5×ULN 부터 보는데 첫 이상 때 최고 ${amino.toFixed(1)}×ULN 이라 점수가 없습니다.` : '',
     ].filter(Boolean).join(' '),
     calls,
     suspectDrugs,
     recommendedTests: tests,
     verification: { total: supports.length, matched, issues: supports.filter(s => !s.ref).map(s => ({ text: s.text, detail: '원자료 위치를 찾지 못함' })) },
-  },
-]
+    confidence,
+  }
+}
+
+export const runs: AgentRun[] = CASES.map(buildRun).filter((r): r is AgentRun => !!r)

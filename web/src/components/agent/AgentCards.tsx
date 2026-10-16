@@ -45,6 +45,8 @@ export function AgentCards({ cs, sim, clock, selected, onSelect, run, runState, 
     const base = { id: 1 as const, name: '발생 예측', when: '첫 이상 전 매시간' }
     const v = a1Verdict(sim, clock)
     if (sim.excluded) cards.push({ ...base, status: 'off', statusText: '대상 아님', main: '–', sub: 'ICU 입실 전 이미 2배 이상', stamp: 'na' })
+    else if (sim.a1.notEligible && sim.first && !isAfter(sim.first.detectAt, clock))
+      cards.push({ ...base, status: 'off', statusText: '대상 아님', main: '대상 아님', sub: '입실 뒤 첫 측정부터 이상', stamp: 'na' })
     else if (!started) cards.push({ ...base, status: 'wait', statusText: '대기', main: '–', sub: '첫 간 검사 결과 대기', stamp: 'wait' })
     else if (v) {
       const main =
@@ -65,7 +67,7 @@ export function AgentCards({ cs, sim, clock, selected, onSelect, run, runState, 
       const alarm = point.p >= sim.a1.threshold
       cards.push({
         ...base, status: 'live', statusText: '매시간', stamp: point.time, alarm,
-        main: <><b className="agc-num">{pct(point.p)}</b>{alarm && <span className="agc-alarm">경보</span>}</>,
+        main: <><b className="agc-num">{pct(point.p)}</b>{alarm && <span className="agc-alarm">경보</span>}{point.confidence?.level === '낮음' && <span className="agc-low">확신 낮음</span>}</>,
         sub: `24시간 안 5배 사건 · ${hm(point.time)} 실행`,
       })
     }

@@ -1,7 +1,6 @@
 // 모델 패키지 (MIMIC-IV 학습, 고정) 를 가상 사례에 적용한 출력 (model-bridge/run_models.py 가 만든 JSON) 을 화면 형식으로 바꾼다.
 // 출력 파일: src/data/model/<사례>.json. 다시 만들기: npm run models
 import type { A1Point, A2Output, A4Forecast, CaseData, EndState, Evidence, Factor, ModelOutputs, Ref } from '../types'
-import c01 from './model/c01.json'
 import { seriesAt } from '../lib/events'
 import { addHours, floorHour } from '../lib/time'
 
@@ -42,7 +41,9 @@ export interface ModelRun {
   a4: { time: string; forecasts: Record<string, Quant[]> }[]
 }
 
-const RUNS: Record<string, ModelRun> = { c01: c01 as ModelRun }
+// src/data/model/<사례 id>.json 을 모두 읽음 (없는 사례는 대체 계산)
+const FILES = import.meta.glob<ModelRun>('./model/*.json', { eager: true, import: 'default' })
+const RUNS: Record<string, ModelRun> = Object.fromEntries(Object.entries(FILES).map(([path, run]) => [path.split('/').at(-1)!.replace(/\.json$/, ''), run]))
 export const modelRun = (caseId: string): ModelRun | undefined => RUNS[caseId]
 
 /** 모델 패키지 검사 이름 → 화면 검사 코드 */
@@ -166,5 +167,9 @@ export function refOf(cs: CaseData, label: string | null, at: string | null): Re
 /** 규칙 모델 근거 한 줄 → 화면 근거 (원자료로 갈 수 있으면 ref) */
 export function evidenceOf(cs: CaseData, s: FlagOut['support'][number]): Evidence {
   const t = s.measured_at ? s.measured_at.replace('T', ' ').slice(5, 16) : undefined
+  if ((s.analyte_or_label ?? '').startsWith('history_')) {
+    const h = cs.history?.flatMap(x => x.codes.map(c => `${c.name} ${c.code} (${x.discharged.slice(0, 7)} 퇴원)`)).join(', ')
+    return { text: `${s.reason}${h ? `: ${h}` : ''}`, time: '이전 입원' }
+  }
   return { text: s.reason, time: t, ref: refOf(cs, s.analyte_or_label, s.measured_at) }
 }
