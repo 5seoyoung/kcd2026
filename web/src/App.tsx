@@ -9,6 +9,7 @@ import { dayIndex, hoursBetween, isAfter, toMs } from './lib/time'
 import { cls, type Highlight } from './lib/ui'
 import { bi, pick, tr, useLang, type Bi } from './lib/i18n'
 import { tx } from './data/cases/en'
+import { setDesktop } from './lib/viewport'
 import { TopBar } from './components/TopBar'
 import { Toolbar } from './components/Toolbar'
 import { PatientList, type LiveRow } from './components/PatientList'
@@ -57,6 +58,8 @@ export default function App() {
   const [playing, setPlaying] = useState(false)
   const [rate, setRate] = useState(1)
   const [view, setView] = useState<PanelView>(1)
+  // 좁은 화면에서는 에이전트와 진료 기록을 번갈아 보여 줌
+  const [mPane, setMPane] = useState<'agents' | 'records'>('agents')
   const [tab, setTab] = useState<TabId>('lab')
   const [hl, setHl] = useState<Highlight>(null)
   const [st, setSt] = useState<RunState>(IDLE)
@@ -180,6 +183,7 @@ export default function App() {
   }
 
   const jump = (ref: Ref) => {
+    setMPane('records')
     setTab(ref.tab)
     setHl(null)
     requestAnimationFrame(() => setHl(h => ({ ref, n: (h?.n ?? 0) + 1 })))
@@ -284,12 +288,24 @@ export default function App() {
         onRate={setRate}
       />
       <PatientBanner p={patient} cs={cs} clock={clock} />
-      <main className="main">
+      <main className={cls('main', `m-${mPane}`)}>
+        <div className="m-bar">
+          <select className="m-patient" value={patientId} onChange={e => selectPatient(e.target.value)} aria-label={tr('환자 선택', 'Choose patient')}>
+            {patients.map(p => (
+              <option key={p.id} value={p.id}>{p.bed} · {tx(p.name)}{p.caseId ? '' : tr(' (기록 없음)', ' (no records)')}</option>
+            ))}
+          </select>
+          <div className="m-seg" role="tablist" aria-label={tr('보기', 'View')}>
+            <button role="tab" aria-selected={mPane === 'agents'} className={cls(mPane === 'agents' && 'on')} onClick={() => setMPane('agents')}>{tr('AI 에이전트', 'AI agents')}</button>
+            <button role="tab" aria-selected={mPane === 'records'} className={cls(mPane === 'records' && 'on')} onClick={() => setMPane('records')}>{tr('진료 기록', 'Records')}</button>
+          </div>
+          <button className="link m-desk" onClick={() => setDesktop(true)}>{tr('PC 화면으로 보기', 'Desktop view')}</button>
+        </div>
         <PatientList selected={patientId} onSelect={selectPatient} live={live} />
         <section className="panel center">
           {cs && sim ? (
             <>
-              <Timeline cs={cs} sim={sim} clock={clock} onSeek={t => moveTo(t, false)} onJump={jump} onAgent={setView} />
+              <Timeline cs={cs} sim={sim} clock={clock} onSeek={t => moveTo(t, false)} onJump={jump} onAgent={v => { setView(v); setMPane('agents') }} />
               <div className="tabs" role="tablist">
                 {TABS.map(t => (
                   <button
@@ -392,7 +408,7 @@ export default function App() {
         </Modal>
       )}
       {wikiAt && <WikiModal key={`${wikiAt.page}#${wikiAt.heading ?? ''}`} at={wikiAt} onClose={() => setWikiAt(null)} />}
-      <div className="narrow-notice">{tr('이 화면은 너비 1280px 이상에서 사용할 수 있습니다.', 'This screen needs a window at least 1280 px wide.')}</div>
+      <button className="btn m-back" onClick={() => setDesktop(false)}>{tr('모바일 화면으로', 'Mobile view')}</button>
     </div>
   )
 }

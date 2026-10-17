@@ -43,8 +43,8 @@ export function Toolbar(p: Props) {
         <button className="btn" disabled>{tr('조회', 'Search')}</button>
       </div>
       <span className="tb-sep" />
-      <button className="btn" onClick={p.onReset}>{tr('새로고침', 'Refresh')}</button>
-      <button className="btn" onClick={p.onLog} disabled={!p.canLog}>{tr('AI 실행 기록', 'AI run log')}</button>
+      <button className="btn tb-reset" onClick={p.onReset}>{tr('새로고침', 'Refresh')}</button>
+      <button className="btn tb-log" onClick={p.onLog} disabled={!p.canLog}>{tr('AI 실행 기록', 'AI run log')}</button>
       {p.elapsed && (
         <>
           <span className="tb-sep" />
