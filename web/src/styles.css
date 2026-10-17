@@ -1022,3 +1022,15 @@ td.trigger { outline: 2px solid var(--warn); outline-offset: -2px; }
 .ev-empty { padding: 3px 8px; font-size: 11px; }
 .ad-head .legend { flex: none; white-space: nowrap; }
 .ad-head .ad-what { min-width: 0; }
+
+/* 언어 전환 (상단 오른쪽) */
+.lang-switch { display: inline-flex; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 2px; overflow: hidden; }
+.lang-switch button { border: none; background: transparent; color: var(--top-ink-2); font: inherit; font-size: 11px; padding: 1px 8px; cursor: pointer; }
+.lang-switch button.on { background: rgba(255, 255, 255, 0.16); color: #fff; font-weight: 700; }
+.lang-switch button:hover:not(.on) { color: #fff; }
+.lang-switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* 영어 화면: 글이 길어지는 칸 */
+html[lang="en"] .cb-reason, html[lang="en"] .cb-next { grid-template-columns: 150px 1fr; }
+html[lang="en"] .es-row { grid-template-columns: 132px 1fr 38px 28px; }
+html[lang="en"] .plist-grid td:nth-child(2) { max-width: 74px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

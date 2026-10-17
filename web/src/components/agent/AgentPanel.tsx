@@ -11,6 +11,7 @@ import { Notices } from './Notices'
 import type { RunState } from './state'
 import type { RagServer } from '../../data/rag'
 import type { WikiAt } from '../WikiModal'
+import { tr } from '../../lib/i18n'
 
 interface Props {
   patient: Patient
@@ -34,21 +35,27 @@ interface Props {
   onWiki: (at: WikiAt) => void
 }
 
-const NAMES: Record<PanelView, string> = { 1: '발생 예측', 2: '종료 상태 예측', 3: '원인 추정', 4: '24시간 궤적 예측', qa: '질의응답' }
+const NAMES = (): Record<PanelView, string> => ({
+  1: tr('발생 예측', 'Early warning'),
+  2: tr('종료 상태 예측', 'End-state prediction'),
+  3: tr('원인 추정', 'Cause assessment'),
+  4: tr('24시간 궤적 예측', '24-h trajectory forecast'),
+  qa: tr('질의응답', 'Q&A'),
+})
 
 export function AgentPanel(p: Props) {
   const { cs, sim, clock } = p
   return (
-    <section className="panel agent" aria-label="간 검사 이상 에이전트">
+    <section className="panel agent" aria-label={tr('간 검사 이상 에이전트', 'Liver-test agents')}>
       <div className="panel-head agent-head">
         <span className="ai-mark" aria-hidden>AI</span>
-        간 검사 이상 에이전트
+        {tr('간 검사 이상 에이전트', 'Liver-test agents')}
         <span className="spacer" />
-        {sim && <span className="head-sub mono">{mdhm(clock)} 기준</span>}
+        {sim && <span className="head-sub mono">{tr(`${mdhm(clock)} 기준`, `as of ${mdhm(clock)}`)}</span>}
       </div>
       {!cs || !sim ? (
         <div className="agent-empty">
-          <div className="muted">{p.patient.liverAlert ? '아직 분석 결과가 없습니다.' : '간 검사 이상 알림이 없습니다.'}</div>
+          <div className="muted">{p.patient.liverAlert ? tr('아직 분석 결과가 없습니다.', 'No analysis results yet.') : tr('간 검사 이상 알림이 없습니다.', 'No liver-test alerts.')}</div>
         </div>
       ) : (
         <>
@@ -56,7 +63,7 @@ export function AgentPanel(p: Props) {
           <Notices cs={cs} sim={sim} clock={clock} />
           <div className="ad-title">
             <span className={p.selected === 'qa' ? 'agc-no ask' : 'agc-no'}>{p.selected === 'qa' ? '?' : p.selected}</span>
-            {NAMES[p.selected]}
+            {NAMES()[p.selected]}
           </div>
           <div className={p.selected === 'qa' ? 'agent-body qa-body' : 'agent-body'} role="tabpanel">
             {p.selected === 1 && <Agent1 cs={cs} sim={sim} clock={clock} events={p.events} />}

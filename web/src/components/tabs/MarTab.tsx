@@ -2,6 +2,8 @@ import { Fragment, useEffect, useRef } from 'react'
 import type { CaseData } from '../../types'
 import { daysBetween, hm, isAfter, md, mdhm, ymd } from '../../lib/time'
 import { cls, isCellHl, isRowHl, type Highlight } from '../../lib/ui'
+import { tr } from '../../lib/i18n'
+import { tx } from '../../data/cases/en'
 
 interface Props {
   cs: CaseData
@@ -26,24 +28,29 @@ export function MarTab({ cs, clock, hl }: Props) {
   return (
     <div className="tab-body">
       <div className="subbar">
-        <strong>투약 기록 (MAR)</strong>
-        <span className="muted">실제 투여 시각. 처방은 날짜 단위라 같은 날 선후는 이 기록으로 봅니다</span>
+        <strong>{tr('투약 기록 (MAR)', 'Medication administration record (MAR)')}</strong>
+        <span className="muted">
+          {tr(
+            '실제 투여 시각. 처방은 날짜 단위라 같은 날 선후는 이 기록으로 봅니다',
+            'Actual administration times. Orders are dated by day, so use this record for the order of events within a day',
+          )}
+        </span>
         <span className="spacer" />
-        <span className="mchip given sample">✓ 투여</span>
-        <span className="mchip stopped sample">■ 중단</span>
+        <span className="mchip given sample">{tr('✓ 투여', '✓ Given')}</span>
+        <span className="mchip stopped sample">{tr('■ 중단', '■ Stopped')}</span>
       </div>
       <div className="grid-wrap" ref={wrap}>
         <table className="grid mar-grid">
           <thead>
             <tr>
-              <th className="stk mc1">약품명</th>
-              <th className="stk mc2">용량</th>
-              <th className="stk mc3">경로</th>
-              <th className="stk mc4">횟수</th>
+              <th className="stk mc1">{tr('약품명', 'Drug')}</th>
+              <th className="stk mc2">{tr('용량', 'Dose')}</th>
+              <th className="stk mc3">{tr('경로', 'Route')}</th>
+              <th className="stk mc4">{tr('횟수', 'Frequency')}</th>
               {days.map(d => (
                 <th key={d} className={cls('dc', d === today && 'today')}>
                   {md(d)}
-                  {d === today && <span className="th-note"> · {hm(clock)} 까지</span>}
+                  {d === today && <span className="th-note">{tr(` · ${hm(clock)} 까지`, ` · to ${hm(clock)}`)}</span>}
                 </th>
               ))}
               <th className="fill" />
@@ -56,15 +63,15 @@ export function MarTab({ cs, clock, hl }: Props) {
               return (
                 <Fragment key={cat}>
                   <tr className="grp">
-                    <td className="stk mc1" colSpan={4}>{cat}</td>
+                    <td className="stk mc1" colSpan={4}>{tx(cat)}</td>
                     <td colSpan={days.length + 1} />
                   </tr>
                   {rows.map(o => (
                     <tr key={o.id} className={cls(isRowHl(hl, 'mar', o.id) && 'is-hl')}>
-                      <td className="stk mc1 name" title={`시작 ${mdhm(o.start)}`}>{o.drug}</td>
-                      <td className="stk mc2">{o.dose}</td>
-                      <td className="stk mc3">{o.route}</td>
-                      <td className="stk mc4">{o.freq}</td>
+                      <td className="stk mc1 name" title={tr(`시작 ${mdhm(o.start)}`, `Started ${mdhm(o.start)}`)}>{tx(o.drug)}</td>
+                      <td className="stk mc2">{tx(o.dose)}</td>
+                      <td className="stk mc3">{tx(o.route)}</td>
+                      <td className="stk mc4">{tx(o.freq)}</td>
                       {days.map(d => (
                         <td key={d} className={cls('dc', d === today && 'today')}>
                           <div className="chips">
@@ -74,10 +81,10 @@ export function MarTab({ cs, clock, hl }: Props) {
                                 <span
                                   key={a.time}
                                   className={cls('mchip', a.status, isCellHl(hl, 'mar', o.id, a.time) && 'is-hl')}
-                                  title={`${mdhm(a.time)} ${a.text ?? ''}`}
+                                  title={`${mdhm(a.time)} ${tx(a.text) ?? ''}`}
                                 >
                                   {MARK[a.status]} {hm(a.time)}
-                                  {a.text && <em>{a.text}</em>}
+                                  {a.text && <em>{tx(a.text)}</em>}
                                 </span>
                               ))}
                           </div>

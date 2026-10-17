@@ -4,10 +4,13 @@
 패키지 함수를 그대로 부른다:
   변수 계산 build_features, 발생 예측 설명 explain_rows (그룹 Shapley, 합성 기준 행),
   궤적 forecast_rows, 원인 규칙 rule_agent1 (snapshot_payload), 간 패턴 군집 assign_clusters, 입력 오류 검사 guard_lab.
-불확실성 (모델은 그대로, 출력 위에서 계산): 2, 3, 4배 모델 사다리, 빠진 핵심 입력을 기준 행 10개로 바꿔 넣은 예측 구간,
+불확실성 (모델은 그대로, 출력 위에서 계산): 2, 3, 4배 모델 사다리, 빠진 핵심 입력을 기준 행 10개로 바꿔 넣고
+잰 핵심 입력을 검사 오차 범위 안에서 흔든 예측 구간,
 MIMIC 개발 집단 5~95% 범위 밖 입력, 원인 규칙의 입력값을 ±10% 바꿨을 때 0/1 이 바뀌는지.
 사례 자료를 패키지의 중간 표 (cohort, lab, context, events) 모양으로 바꾸는 부분만 여기서 한다.
 정의는 MODEL_CARD.md 를 따른다: 공개 시각 = max(채혈, 보고), 정상 = 세 항목 모두 24시간 안 측정이고 2배 미만.
+다른 점 하나 (10/17 결정): 종료 상태와 원인 추정은 첫 이상 (2배) 이 아니라 5배 사건 시점에 돌린다. 예후 모델은 첫 이상 시점
+자료로 학습했으므로 5배 시점 적용은 학습 범위 밖이다 (원인 규칙은 학습이 없어 시점과 무관).
 출력에는 환자 식별 번호가 없다 (안에서 쓰는 stay_id 는 1).
 
   KCD_PYTHON=<python 3.11, scikit-learn 1.9.0 ...> npm run models
@@ -36,7 +39,8 @@ RANGE_FEATS = ["ALT_latest", "AST_latest", "ALP_latest", "TBIL_latest", "INR_lat
                "CREAT_latest", "BUN_latest", "NTPROBNP_latest", "age", "PLATELET_latest", "WBC_latest", "SODIUM_latest",
                "GLUCOSE_latest", "BICARB_latest", "HEMOGLOBIN_latest", "MAP_latest", "HR_latest", "RR_latest", "SPO2_latest", "TEMP_C_latest"]
 LADDER = (2, 3, 4)  # 5배는 발생 예측 모델 (agent3_gbm, agent3_gbm_5x 와 같은 모델)
-ERR = 0.10  # 검사 오차 범위 (판정 취약)
+ERR = 0.10  # 검사 오차 범위 (판정 취약, 구간의 잰 값 흔들기). 임상의 선생님 확인 전 기본값
+NOISE = 10  # 잰 값 흔들기 줄 수
 AGENT2_INPUTS = ["ALT_latest", "AST_latest", "ALP_latest", "TBIL_latest", "ALT_delta24", "LACTATE_latest", "MAP_latest",
                  "pressor_6h", "CREAT_latest", "INR_latest", "PLATELET_latest", "WBC_latest", "age", "hours_since_icu"]
 
@@ -54,30 +58,42 @@ def fmt(t) -> str:
     return pd.Timestamp(t).strftime("%Y-%m-%d %H:%M")
 
 
-def imputation(predict, X: pd.DataFrame, bg: pd.DataFrame):
-    """빠진 핵심 입력 (24시간 안 측정 없음) 의 변수 묶음 (값, 측정 뒤 시간, 횟수, 24시간 변화) 을 기준 행 10개
-    (개발 집단 백분위) 로 바꿔 넣은 예측 10개의 10~90%. 빠진 항목이 여럿이면 같은 기준 행을 함께 넣는다.
-    항목마다 '그 항목을 재면' 남는 구간도 계산: 그 항목 값을 기준 행 10개에 걸쳐 두고, 남은 항목만 바꿔 넣은 구간의 평균."""
+def interval(predict, X: pd.DataFrame, bg: pd.DataFrame):
+    """핵심 입력 구간 (불확실성 기획안 4-2). 빠진 핵심 입력 (24시간 안 측정 없음) 은 변수 묶음 (값, 측정 뒤 시간, 횟수,
+    24시간 변화) 을 기준 행 10개 (개발 집단 백분위) 로 바꿔 넣고, 빠진 항목이 여럿이면 같은 기준 행을 함께 넣는다.
+    잰 핵심 입력은 검사 오차 범위 (±ERR) 안에서 흔든다 (최근 값과 24시간 변화를 같은 양만큼). 흔드는 배율은 ±ERR 를 10칸으로
+    나눈 격자를 항목마다 따로 섞어 10줄로 짝지음. 구간 = 기준 행 x 흔들기 줄을 모두 짝지은 예측의 10~90%.
+    빠진 항목마다 '그 항목을 재면' 남는 구간도 계산: 그 항목 값을 기준 행 10개에 걸쳐 두고, 나머지만 바꿔 넣고 흔든 구간의 평균."""
     cols, n, out = list(X.columns), len(bg), []
+    rng = np.random.default_rng(20261016)
+    grid = np.linspace(1 - ERR, 1 + ERR, NOISE)
+    shake = {a: rng.permutation(grid) for a in CORE}
     for _, x in X.iterrows():
         miss = [a for a in CORE if pd.isna(x[f"{a}_latest"])]
-        if not miss:
-            out.append((miss, None, []))
-            continue
+        meas = [a for a in CORE if a not in miss]
 
-        def fill(idx):  # idx: 항목 -> 기준 행 번호 배열
-            N = len(next(iter(idx.values())))
-            R = pd.DataFrame(np.repeat(x.values[None, :], N, axis=0), columns=cols)
-            for a, ix in idx.items():
+        def fill(ix_bg, ix_shake, fixed=None):  # fixed: (빠진 항목, 그 항목의 기준 행 번호 배열)
+            R = pd.DataFrame(np.repeat(x.values[None, :], len(ix_shake), axis=0), columns=cols)
+            for a in miss:
+                ix = fixed[1] if fixed and fixed[0] == a else ix_bg
                 for s in BLOCK:
                     R[a + s] = bg[a + s].values[ix]
+            for a in meas:
+                d = x[f"{a}_latest"] * (shake[a][ix_shake] - 1)
+                R[f"{a}_latest"] = x[f"{a}_latest"] + d
+                if pd.notna(x[f"{a}_delta24"]):
+                    R[f"{a}_delta24"] = x[f"{a}_delta24"] + d
             return predict(R)
 
-        lo, hi = np.quantile(fill({a: np.arange(n) for a in miss}), [.1, .9])
+        nb = n if miss else 1
+        i, m = np.repeat(np.arange(nb), NOISE), np.tile(np.arange(NOISE), nb)
+        lo, hi = np.quantile(fill(i, m), [.1, .9])
         nxt = []
         for a in miss:
-            j, i = np.repeat(np.arange(n), n), np.tile(np.arange(n), n)
-            P = fill({b: (j if b == a else i) for b in miss}).reshape(n, n)  # 행: 그 항목 값, 열: 남은 항목
+            nr = n if len(miss) > 1 else 1  # 남은 빠진 항목의 기준 행
+            j = np.repeat(np.arange(n), nr * NOISE)
+            i, m = np.tile(np.repeat(np.arange(nr), NOISE), n), np.tile(np.arange(NOISE), n * nr)
+            P = fill(i, m, (a, j)).reshape(n, nr * NOISE)  # 행: 그 항목 값, 열: 남은 항목과 흔들기
             q = np.quantile(P, [.1, .9], axis=1)
             nxt.append({"analyte": a, "lo": r4(q[0].mean()), "hi": r4(q[1].mean())})
         nxt.sort(key=lambda d: d["hi"] - d["lo"])
@@ -140,18 +156,20 @@ def run_case(C: dict, pkg: Path, card: str, M, out_path: Path):
     hist = D.history_flags(cohort, adm, dx)
     hist_row = {k: v for k, v in hist.drop(columns="stay_id").iloc[0].items()}
 
-    # ---- 제외 기준과 첫 이상 (2배)
+    # ---- 제외 기준, 첫 이상 (2배, 발생 예측이 멈추는 시점), 5배 사건 (종료 상태와 원인 추정이 도는 시점)
     pre = lab[lab.analyte.isin(D.TRIGGERS) & (lab.charttime < intime) & (lab.ratio >= 2)]
     if len(pre):
         raise SystemExit("ICU 입실 전 같은 입원에서 이미 2배 이상: 분석 대상이 아닙니다")
     inside = lab[lab.analyte.isin(D.TRIGGERS) & (lab.available_at >= intime) & (lab.available_at <= outtime)]
     hits = inside[inside.ratio >= 2].sort_values(["available_at", "charttime"])
     t0 = hits.available_at.iloc[0] if len(hits) else None
-    detect = None if t0 is None else (t0 if t0.minute == 0 else t0.floor("h") + pd.Timedelta(hours=1))
-    events = pd.DataFrame([{"case_id": C["caseId"], "stay_id": SID, "subject_id": SID, "hadm_id": SID, "t0": t0, "split": "evaluation"}]) if t0 is not None else pd.DataFrame()
+    ceil_h = lambda t: t if t.minute == 0 else t.floor("h") + pd.Timedelta(hours=1)
+    detect = None if t0 is None else ceil_h(t0)
+    hits5 = inside[inside.ratio >= 5].sort_values(["available_at", "charttime"])
+    t5 = hits5.available_at.iloc[0] if len(hits5) else None
 
     ticks = hourly(intime, outtime)
-    out = {"meta": {}, "first_event": None, "a1": [], "a2": None, "a3": None, "cluster": None, "a4": []}
+    out = {"meta": {}, "first_event": None, "target_event": None, "a1": [], "a2": None, "a3": None, "cluster": None, "a4": []}
 
     # ---- 1 발생 예측 (패키지 Agent 3): 첫 이상을 알기 전 매시간, 정상 구간에서만
     b1 = M("agent3_gbm.joblib")
@@ -193,7 +211,7 @@ def run_case(C: dict, pkg: Path, card: str, M, out_path: Path):
         for k in LADDER:
             m = M(f"agent3_gbm_{k}x.joblib")
             lad[k] = m["model"].predict_proba(X1.reindex(columns=m["features"]).astype(float))[:, 1]
-        imp = imputation(lambda A: b1["model"].predict_proba(A[b1["features"]].astype(float))[:, 1], X1, bg)
+        imp = interval(lambda A: b1["model"].predict_proba(A[b1["features"]].astype(float))[:, 1], X1, bg)
         for j, t in enumerate(ok.t):
             miss, iv, nxt = imp[j]
             x = X1.iloc[j]
@@ -224,19 +242,23 @@ def run_case(C: dict, pkg: Path, card: str, M, out_path: Path):
     if t0 is not None:
         trig = hits.iloc[0]
         out["first_event"] = {"t0": fmt(t0), "drawn": fmt(trig.charttime), "analyte": trig.analyte, "ratio": r4(trig.ratio), "detect": fmt(detect)}
-        X0 = D.build_features(events.rename(columns={"t0": "t"})[["stay_id", "t"]], lab, context, cohort, hist)
+
+    if t5 is not None:
+        trig = hits5.iloc[0]
+        out["target_event"] = {"t0": fmt(t5), "drawn": fmt(trig.charttime), "analyte": trig.analyte, "ratio": r4(trig.ratio), "detect": fmt(ceil_h(t5))}
+        X0 = D.build_features(pd.DataFrame({"stay_id": [SID], "t": [t5]}), lab, context, cohort, hist)
 
         # ---- 2 종료 상태: 4경로 확률 + ICU 사망 (별도 모델)
         b2 = M("prognosis_gbm.joblib")
         P = b2["model"].predict_proba(X0.reindex(columns=b2["features"]).astype(float))[0]
         pd_ = b2["death_model"].predict_proba(X0.reindex(columns=b2["death_features"]).astype(float))[0, 1]
-        out["a2"] = {"t0": fmt(t0), "classes": list(b2["classes"]), "probs": {c: r4(v) for c, v in zip(b2["classes"], P)},
+        out["a2"] = {"t0": fmt(t5), "classes": list(b2["classes"]), "probs": {c: r4(v) for c, v in zip(b2["classes"], P)},
                      "icu_death": r4(pd_), "inputs": {k: r4(X0[k].iloc[0]) for k in AGENT2_INPUTS if k in X0}}
 
         # ---- 3 원인: 규칙 (학습 없음), 48시간 스냅숏
-        payload = D.snapshot_payload(SID, t0, {SID: lab}, {SID: context}, hist_row)
+        payload = D.snapshot_payload(SID, t5, {SID: lab}, {SID: context}, hist_row)
         r = rule_agent1(payload)
-        out["a3"] = {"t0": fmt(t0), "model": RULE_VERSION, "pattern": r["pattern"], "abstain": r["abstain"], "history": {k: (None if pd.isna(v) else bool(v)) for k, v in hist_row.items()},
+        out["a3"] = {"t0": fmt(t5), "model": RULE_VERSION, "pattern": r["pattern"], "abstain": r["abstain"], "history": {k: (None if pd.isna(v) else bool(v)) for k, v in hist_row.items()},
                      "uncertainty": r["uncertainty"], "flags": {c: r["flags"][c] for c in CAUSE_FLAGS},
                      "snapshot": {"labs": len(payload["labs"]), "context": len(payload["context"])}}
         # 규칙이 읽은 입력 (근거 완성도 계산용): 스냅숏 속 검사, 활력징후 종류, 기록 종류, 혈색소 감소, 혈청 검사 수
@@ -273,7 +295,7 @@ def run_case(C: dict, pkg: Path, card: str, M, out_path: Path):
 
         # ---- 보조: 간 패턴 군집 (원인 판정에 쓰지 않음). 임상 표현형 군집은 개발 때 불안정 → 쓰지 않음
         cm = M("cluster_models.joblib")
-        last = lambda an: lab[lab.analyte.eq(an) & (lab.available_at <= t0) & (lab.charttime >= t0 - pd.Timedelta(hours=24))].sort_values("charttime").tail(1)
+        last = lambda an: lab[lab.analyte.eq(an) & (lab.available_at <= t5) & (lab.charttime >= t5 - pd.Timedelta(hours=24))].sort_values("charttime").tail(1)
         la, lp = last("ALT"), last("ALP")
         rr = (la.ratio.iloc[0] / lp.ratio.iloc[0]) if len(la) and len(lp) and abs((la.charttime.iloc[0] - lp.charttime.iloc[0]).total_seconds()) <= 6 * 3600 else np.nan
         F = pd.DataFrame([{"ALT_ratio": X0["ALT_latest"].iloc[0], "ALP_ratio": X0["ALP_latest"].iloc[0],
@@ -305,6 +327,7 @@ def run_case(C: dict, pkg: Path, card: str, M, out_path: Path):
                    "built_at": b1.get("built_at"), "sklearn": sklearn.__version__, "python": sys.version.split()[0],
                    "rule_model": RULE_VERSION, "agent1_internal": {"auroc": r4(float(auroc.group(1))), "auprc": r4(float(auroc.group(2)))} if auroc else None,
                    "case": C["caseId"], "note": "가상 사례에 고정 모델을 적용한 출력. 환자 식별 번호 없음.",
+                   "error_range": ERR,
                    # 확신 규칙 2 의 기준 (발생 예측 모델 기준 행의 5%, 95%. 개발 집단 정상 구간 시각의 변수별 백분위)
                    "reference": {f.removesuffix("_latest"): [r4(lo), r4(hi)] for f, (lo, hi) in ref.items()},
                    # 연결부가 모델에 넘기는 자료 (넘기지 않는 것은 화면에서 '연결 안 됨')
@@ -313,7 +336,8 @@ def run_case(C: dict, pkg: Path, card: str, M, out_path: Path):
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     n1 = sum(1 for x in out["a1"] if x["eligible"])
-    print(f"{out_path}: 발생 예측 {len(out['a1'])}시각 (정상 {n1}), 궤적 {len(out['a4'])}시각, 첫 이상 {out['first_event'] and out['first_event']['t0']}")
+    print(f"{out_path}: 발생 예측 {len(out['a1'])}시각 (정상 {n1}), 궤적 {len(out['a4'])}시각, 첫 이상 {out['first_event'] and out['first_event']['t0']}, "
+          f"5배 사건 {out['target_event'] and out['target_event']['t0']}")
 
 
 if __name__ == "__main__":

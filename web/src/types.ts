@@ -290,7 +290,7 @@ export interface A1Point {
 
 export type EndState = 'rec-alive' | 'rec-dead' | 'norec-dead' | 'norec-alive'
 
-/** 에이전트 2: 첫 이상 때 한 번. 회복 여부 x ICU 사망 여부 4경로 확률 */
+/** 에이전트 2: 5배 사건 때 한 번. 회복 여부 x ICU 사망 여부 4경로 확률 */
 export interface A2Output {
   probs: Record<EndState, number>
   /** ICU 사망 확률 (판정 불가 사건까지 넣어 학습한 별도 모델) */

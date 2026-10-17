@@ -12,3 +12,8 @@ wiki_kb/
 
 # MIMIC model package (models, notebooks, subject id list): review before publishing
 kcd_model_package_*/
+
+# Local MIMIC-IV runs (credentialed, patient-level): never commit
+local_mimic/
+
+__pycache__/

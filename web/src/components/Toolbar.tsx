@@ -1,4 +1,5 @@
 import { cls } from '../lib/ui'
+import { tr } from '../lib/i18n'
 
 interface Props {
   onReset: () => void
@@ -38,27 +39,27 @@ export function Toolbar(p: Props) {
   return (
     <div className="toolbar">
       <div className="search">
-        <input disabled placeholder="등록번호 또는 이름" aria-label="환자 검색" />
-        <button className="btn" disabled>조회</button>
+        <input disabled placeholder={tr('등록번호 또는 이름', 'MRN or name')} aria-label={tr('환자 검색', 'Patient search')} />
+        <button className="btn" disabled>{tr('조회', 'Search')}</button>
       </div>
       <span className="tb-sep" />
-      <button className="btn" onClick={p.onReset}>새로고침</button>
-      <button className="btn" onClick={p.onLog} disabled={!p.canLog}>AI 실행 기록</button>
+      <button className="btn" onClick={p.onReset}>{tr('새로고침', 'Refresh')}</button>
+      <button className="btn" onClick={p.onLog} disabled={!p.canLog}>{tr('AI 실행 기록', 'AI run log')}</button>
       {p.elapsed && (
         <>
           <span className="tb-sep" />
-          <div className="clock" role="group" aria-label="기준 시각">
-            <span className="clk-label">기준 시각</span>
+          <div className="clock" role="group" aria-label={tr('기준 시각', 'As-of time')}>
+            <span className="clk-label">{tr('기준 시각', 'As-of time')}</span>
             <span className="clk-time mono">{p.clock}</span>
             <span className="clk-elapsed">{p.elapsed}</span>
-            <button className="btn icon" onClick={p.onStart} disabled={p.atStart} title="입실 시각으로" aria-label="입실 시각으로"><Icon d={ICON.start} /></button>
-            <button className="btn icon" onClick={() => p.onStep(-1)} disabled={p.atStart} title="1시간 전" aria-label="1시간 전"><Icon d={ICON.prev} /></button>
-            <button className={cls('btn play', p.playing && 'on')} onClick={p.onPlay} aria-label={p.playing ? '정지' : '재생'}>
+            <button className="btn icon" onClick={p.onStart} disabled={p.atStart} title={tr('입실 시각으로', 'To ICU admission')} aria-label={tr('입실 시각으로', 'To ICU admission')}><Icon d={ICON.start} /></button>
+            <button className="btn icon" onClick={() => p.onStep(-1)} disabled={p.atStart} title={tr('1시간 전', '1 h back')} aria-label={tr('1시간 전', '1 h back')}><Icon d={ICON.prev} /></button>
+            <button className={cls('btn play', p.playing && 'on')} onClick={p.onPlay} aria-label={p.playing ? tr('정지', 'Pause') : tr('재생', 'Play')}>
               <Icon d={p.playing ? ICON.pause : ICON.play} />
-              {p.playing ? '정지' : '재생'}
+              {p.playing ? tr('정지', 'Pause') : tr('재생', 'Play')}
             </button>
-            <button className="btn icon" onClick={() => p.onStep(1)} disabled={p.atEnd} title="1시간 뒤" aria-label="1시간 뒤"><Icon d={ICON.next} /></button>
-            <span className="clk-rate" role="radiogroup" aria-label="재생 속도">
+            <button className="btn icon" onClick={() => p.onStep(1)} disabled={p.atEnd} title={tr('1시간 뒤', '1 h forward')} aria-label={tr('1시간 뒤', '1 h forward')}><Icon d={ICON.next} /></button>
+            <span className="clk-rate" role="radiogroup" aria-label={tr('재생 속도', 'Playback speed')}>
               {RATES.map(r => (
                 <button key={r} role="radio" aria-checked={p.rate === r} className={cls('btn mini', p.rate === r && 'on')} onClick={() => p.onRate(r)}>{r}×</button>
               ))}
@@ -67,7 +68,7 @@ export function Toolbar(p: Props) {
         </>
       )}
       <span className="spacer" />
-      <button className="btn" onClick={p.onHelp}>도움말</button>
+      <button className="btn" onClick={p.onHelp}>{tr('도움말', 'Help')}</button>
     </div>
   )
 }

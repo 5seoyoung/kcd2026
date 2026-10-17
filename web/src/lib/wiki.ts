@@ -1,6 +1,7 @@
 // 근거 위키 (wiki_kb) 읽기와 검색. 파일은 scripts/build-wiki.mjs 가 public/wiki/kb.json 으로 만든다.
 import { useEffect, useState } from 'react'
 import { buildIndex, search, type Bm25Index } from './bm25'
+import { tr } from './i18n'
 
 export interface WikiPage {
   id: string
@@ -43,7 +44,7 @@ let loading: Promise<Wiki> | undefined
 export function loadWiki(): Promise<Wiki> {
   loading ??= fetch('./wiki/kb.json')
     .then(r => {
-      if (!r.ok) throw new Error(`근거 위키를 읽지 못했습니다 (${r.status})`)
+      if (!r.ok) throw new Error(tr(`근거 위키를 읽지 못했습니다 (${r.status})`, `Could not load the evidence wiki (${r.status})`))
       return r.json() as Promise<WikiKb>
     })
     .then(kb => {

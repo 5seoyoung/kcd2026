@@ -5,6 +5,7 @@ import { activeAt, EVENT_CODES, itemOf, seriesAt, uln } from '../lib/events'
 import { fmtNum } from '../lib/lab'
 import { rateAt } from '../lib/ui'
 import { addHours, hoursBetween, isAfter } from '../lib/time'
+import { tr } from '../lib/i18n'
 
 const sigmoid = (x: number) => 1 / (1 + Math.exp(-x))
 const short = (name: string) => name.split(' (')[0]
@@ -46,12 +47,12 @@ export function agent1At(cs: CaseData, t: string): A1Point {
   const factors: { f: Factor; w: number }[] = []
   if (top) {
     const it = itemOf(cs, top.code)
-    factors.push({ f: { name: `${short(it.name)} 마지막 값`, value: `${fmtNum(top.value, it.dp)} (${top.x.toFixed(1)}배)`, dir: c.liver > 0.3 ? '+' : '-' }, w: Math.abs(c.liver) })
-    factors.push({ f: { name: `${short(it.name)} 상승 속도`, value: `${top.slope >= 0 ? '+' : ''}${top.slope.toFixed(1)}배/일`, dir: c.slope > 0.2 ? '+' : '-' }, w: c.slope })
+    factors.push({ f: { name: tr(`${short(it.name)} 마지막 값`, `${short(it.name)} last value`), value: tr(`${fmtNum(top.value, it.dp)} (${top.x.toFixed(1)}배)`, `${fmtNum(top.value, it.dp)} (${top.x.toFixed(1)}×)`), dir: c.liver > 0.3 ? '+' : '-' }, w: Math.abs(c.liver) })
+    factors.push({ f: { name: tr(`${short(it.name)} 상승 속도`, `${short(it.name)} rise rate`), value: tr(`${top.slope >= 0 ? '+' : ''}${top.slope.toFixed(1)}배/일`, `${top.slope >= 0 ? '+' : ''}${top.slope.toFixed(1)}×/day`), dir: c.slope > 0.2 ? '+' : '-' }, w: c.slope })
   }
-  factors.push({ f: { name: 'MAP 65 미만 (지난 12시간)', value: `${hypoH}시간`, dir: hypoH ? '+' : '-' }, w: c.hypo })
-  factors.push({ f: { name: '승압제', value: ne ? `노르에피네프린 ${ne.toFixed(2)}${vaso ? ' + 바소프레신' : ''}` : '없음', dir: c.ne ? '+' : '-' }, w: c.ne })
-  factors.push({ f: { name: '젖산 최고 (지난 12시간)', value: lac !== undefined ? `${lac.toFixed(1)} mmol/L` : '측정 없음', dir: c.lac > 0.2 ? '+' : '-' }, w: c.lac })
+  factors.push({ f: { name: tr('MAP 65 미만 (지난 12시간)', 'MAP < 65 (last 12 h)'), value: tr(`${hypoH}시간`, `${hypoH} h`), dir: hypoH ? '+' : '-' }, w: c.hypo })
+  factors.push({ f: { name: tr('승압제', 'Vasopressor'), value: ne ? tr(`노르에피네프린 ${ne.toFixed(2)}${vaso ? ' + 바소프레신' : ''}`, `Norepinephrine ${ne.toFixed(2)}${vaso ? ' + vasopressin' : ''}`) : tr('없음', 'None'), dir: c.ne ? '+' : '-' }, w: c.ne })
+  factors.push({ f: { name: tr('젖산 최고 (지난 12시간)', 'Peak lactate (last 12 h)'), value: lac !== undefined ? `${lac.toFixed(1)} mmol/L` : tr('측정 없음', 'Not measured'), dir: c.lac > 0.2 ? '+' : '-' }, w: c.lac })
   factors.sort((a, b) => b.w - a.w)
 
   return { time: t, p, factors: factors.map(x => x.f) }

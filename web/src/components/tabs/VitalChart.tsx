@@ -2,6 +2,7 @@ import { useState, type KeyboardEvent, type MouseEvent } from 'react'
 import type { CaseData, LiverEvent, MarOrder, VitalRow } from '../../types'
 import { addHours, daysBetween, isAfter, md, mdhm, toMs } from '../../lib/time'
 import { rateAt, useWidth, type Highlight } from '../../lib/ui'
+import { tr } from '../../lib/i18n'
 
 interface Lane {
   key: string
@@ -36,8 +37,8 @@ export function VitalChart({ cs, rows, clock, events, hl }: Props) {
   const lanes: Lane[] = [
     { key: 'map', label: 'MAP', unit: 'mmHg', dom: [40, 110], dp: 0, thr: { v: 65, below: true }, get: r => r.map },
     { key: 'spo2', label: 'SpO2', unit: '%', dom: [80, 100], dp: 0, thr: { v: 90, below: true }, get: r => r.spo2 },
-    { key: 'hr', label: '심박수', unit: '/분', dom: [60, 170], dp: 0, thr: { v: 130, below: false }, get: r => r.hr },
-    { key: 'ne', label: '노르에피네프린', unit: 'mcg/kg/min', dom: [0, 0.4], dp: 2, get: r => rateAt(ne, r.time) },
+    { key: 'hr', label: tr('심박수', 'Heart rate'), unit: tr('/분', '/min'), dom: [60, 170], dp: 0, thr: { v: 130, below: false }, get: r => r.hr },
+    { key: 'ne', label: tr('노르에피네프린', 'Norepinephrine'), unit: 'mcg/kg/min', dom: [0, 0.4], dp: 2, get: r => rateAt(ne, r.time) },
   ]
 
   const W = Math.max(width, 480)
@@ -92,7 +93,10 @@ export function VitalChart({ cs, rows, clock, events, hl }: Props) {
         onKeyDown={onKey}
         onBlur={() => setHover(null)}
         role="img"
-        aria-label="활력징후 추이. 아래 표에 같은 값이 있습니다. 좌우 화살표로 시각을 옮길 수 있습니다"
+        aria-label={tr(
+          '활력징후 추이. 아래 표에 같은 값이 있습니다. 좌우 화살표로 시각을 옮길 수 있습니다',
+          'Vital-sign trends. The table below has the same values. Use the left and right arrow keys to move the time',
+        )}
       >
         {midnights.map(d => (
           <g key={d}>
@@ -140,7 +144,7 @@ export function VitalChart({ cs, rows, clock, events, hl }: Props) {
         {events.map(ev => (
           <g key={ev.k} className="vc-ev">
             <line x1={sx(ev.t0)} x2={sx(ev.t0)} y1={TOP - 6} y2={H - 6} />
-            <text x={sx(ev.t0) + 4} y={H - 1}>{ev.k}배</text>
+            <text x={sx(ev.t0) + 4} y={H - 1}>{tr(`${ev.k}배`, `${ev.k}×`)}</text>
           </g>
         ))}
         {hr && <line x1={hx} x2={hx} y1={TOP - 4} y2={H - 8} className="vc-cross" />}

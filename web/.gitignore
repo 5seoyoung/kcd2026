@@ -2,3 +2,4 @@ node_modules
 dist
 model-bridge/.build/
 model-bridge/cases/
+.venv-models/

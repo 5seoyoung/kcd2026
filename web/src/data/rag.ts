@@ -2,6 +2,8 @@
 // 서버가 없거나 실패하면 찾은 조각을 그대로 보여 준다. 서버 코드는 server/rag-server.mjs.
 import type { QaAnswer, QaHit, QaSource } from '../types'
 import { citedSources, loadWiki, searchWiki, type Wiki } from '../lib/wiki'
+import { tr } from '../lib/i18n'
+import { wikiQuery } from './qa'
 
 /** 이 점수와 비율을 넘어야 질문에 맞는 근거로 봄. 못 넘으면 '꼭 맞는 근거가 아닐 수 있음' */
 const STRONG_SCORE = 12
@@ -64,11 +66,13 @@ interface ServerAnswer {
   checks: NonNullable<QaAnswer['llm']>['checks']
 }
 
-export async function answerWiki(q: string, server: RagServer | null): Promise<QaAnswer> {
+export async function answerWiki(shown: string, server: RagServer | null): Promise<QaAnswer> {
+  // 위키와 검색이 한국어라 정해 둔 지식 질문은 영어 화면에서도 한국어 질문으로 찾음
+  const q = wikiQuery(shown)
   const w = await loadWiki()
   const found = searchWiki(w, q, TOP_K)
   if (!found.length) {
-    return { mode: 'wiki', status: 'notFound', sources: [], text: ['근거 위키에서 이 질문의 근거를 찾지 못했습니다. 근거 없이 답하지 않습니다.'] }
+    return { mode: 'wiki', status: 'notFound', sources: [], text: [tr('근거 위키에서 이 질문의 근거를 찾지 못했습니다. 근거 없이 답하지 않습니다.', 'No evidence for this question was found in the evidence wiki. No answer is given without evidence.')] }
   }
   const hits = found.map(toHit)
   const strong = found[0].score >= STRONG_SCORE && found[0].coverage >= STRONG_COVERAGE
@@ -96,7 +100,7 @@ export async function answerWiki(q: string, server: RagServer | null): Promise<Q
       return {
         mode: 'wiki',
         status: strong ? undefined : 'weak',
-        text: ['답 생성 서버에 연결하지 못해 근거 위키에서 찾은 조각만 보여 줍니다.'],
+        text: [tr('답 생성 서버에 연결하지 못해 근거 위키에서 찾은 조각만 보여 줍니다.', 'Could not reach the answer server, so only the passages found in the evidence wiki are shown.')],
         hits,
         sources: sourcesOf(w, hits),
       }
@@ -108,8 +112,14 @@ export async function answerWiki(q: string, server: RagServer | null): Promise<Q
     status: strong ? undefined : 'weak',
     text: [
       strong
-        ? `근거 위키에서 찾은 조각 ${hits.length}개입니다. 원문과 PDF 쪽수는 조각 안에 있습니다.`
-        : '질문과 꼭 맞는 근거가 위키에 없을 수 있습니다. 가장 가까운 조각을 보여 줍니다.',
+        ? tr(
+            `근거 위키에서 찾은 조각 ${hits.length}개입니다. 원문과 PDF 쪽수는 조각 안에 있습니다.`,
+            `${hits.length} ${hits.length === 1 ? 'passage' : 'passages'} found in the evidence wiki. Sources and PDF page numbers are inside each passage.`,
+          )
+        : tr(
+            '질문과 꼭 맞는 근거가 위키에 없을 수 있습니다. 가장 가까운 조각을 보여 줍니다.',
+            'The wiki may not have evidence that exactly matches the question. The closest passages are shown.',
+          ),
     ],
     hits,
     sources: sourcesOf(w, hits),

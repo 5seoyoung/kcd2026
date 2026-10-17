@@ -7,6 +7,7 @@ import { lastHeading, useWiki, type Wiki } from '../../lib/wiki'
 import { inline, render } from '../../lib/md'
 import { mdhm } from '../../lib/time'
 import { cls } from '../../lib/ui'
+import { lang, tr } from '../../lib/i18n'
 import type { WikiAt } from '../WikiModal'
 
 interface Props {
@@ -47,28 +48,37 @@ export function QnA({ cs, sim, clock, run, msgs, pending, server, onAsk, onJump,
   return (
     <div className="qa">
       <div className="qa-scope">
-        <div>
-          이 환자 질문은 <b className="mono">{mdhm(clock)}</b> 까지의 기록과 에이전트 출력으로, 지식 질문은 근거 위키로만 답합니다. 치료 결정은 답하지 않습니다.
-        </div>
+        {lang() === 'en' ? (
+          <div>
+            Patient questions are answered only from the record and agent outputs up to <b className="mono">{mdhm(clock)}</b>, knowledge questions only from the evidence wiki. Treatment decisions are not answered. The evidence wiki is in Korean.
+          </div>
+        ) : (
+          <div>
+            이 환자 질문은 <b className="mono">{mdhm(clock)}</b> 까지의 기록과 에이전트 출력으로, 지식 질문은 근거 위키로만 답합니다. 치료 결정은 답하지 않습니다.
+          </div>
+        )}
         <div className="qa-kb">
           {wiki ? (
             <button className="link" onClick={() => onWiki({ page: 'index' })}>
-              근거 위키 {wiki.kb.meta.pages}쪽 · 원문 {wiki.kb.meta.sources}편 · 갱신 {wiki.kb.meta.updated}
+              {tr(
+                `근거 위키 ${wiki.kb.meta.pages}쪽 · 원문 ${wiki.kb.meta.sources}편 · 갱신 ${wiki.kb.meta.updated ?? ''}`,
+                `Evidence wiki ${wiki.kb.meta.pages} pages · ${wiki.kb.meta.sources} sources · updated ${wiki.kb.meta.updated ?? ''}`,
+              )}
             </button>
           ) : (
-            <span className="muted">{error ?? '근거 위키 읽는 중'}</span>
+            <span className="muted">{error ?? tr('근거 위키 읽는 중', 'Loading the evidence wiki')}</span>
           )}
           <span className="sep">|</span>
-          {server ? <span className="qa-gen on">답 생성 {server.model}</span> : <span className="qa-gen">위키 검색 결과로 답함</span>}
+          {server ? <span className="qa-gen on">{tr('답 생성', 'Answers by')} {server.model}</span> : <span className="qa-gen">{tr('위키 검색 결과로 답함', 'Answers from wiki search')}</span>}
         </div>
       </div>
       <div className="qa-msgs" aria-live="polite">
-        {!msgs.length && !pending && <div className="muted qa-empty">아래 질문을 누르거나 직접 입력하세요.</div>}
+        {!msgs.length && !pending && <div className="muted qa-empty">{tr('아래 질문을 누르거나 직접 입력하세요.', 'Click a question below or type your own.')}</div>}
         {msgs.map(m => <Msg key={m.id} m={m} wiki={wiki} onJump={onJump} onWiki={onWiki} />)}
         {pending && (
           <>
             <div className="qa-q">{pending}</div>
-            <div className="qa-a pending"><span className="qa-spin" aria-hidden />근거를 찾는 중</div>
+            <div className="qa-a pending"><span className="qa-spin" aria-hidden />{tr('근거를 찾는 중', 'Searching for evidence')}</div>
           </>
         )}
         <div ref={end} />
@@ -79,7 +89,7 @@ export function QnA({ cs, sim, clock, run, msgs, pending, server, onAsk, onJump,
           if (!list.length) return null
           return (
             <div key={k} className="qa-sug-row">
-              <span className="qa-sug-k">{k === '환자' ? '이 환자' : '지식'}</span>
+              <span className="qa-sug-k">{k === '환자' ? tr('이 환자', 'This patient') : tr('지식', 'Knowledge')}</span>
               {list.map(s => (
                 <button key={s.id} className="qa-chip" disabled={!!pending} onClick={() => onAsk({ id: s.id })}>{s.q}</button>
               ))}
@@ -88,8 +98,8 @@ export function QnA({ cs, sim, clock, run, msgs, pending, server, onAsk, onJump,
         })}
       </div>
       <form className="qa-input" onSubmit={submit}>
-        <input value={text} onChange={e => setText(e.target.value)} placeholder="질문 입력" aria-label="질문" />
-        <button className="btn" disabled={!text.trim() || !!pending}>보내기</button>
+        <input value={text} onChange={e => setText(e.target.value)} placeholder={tr('질문 입력', 'Type a question')} aria-label={tr('질문', 'Question')} />
+        <button className="btn" disabled={!text.trim() || !!pending}>{tr('보내기', 'Send')}</button>
       </form>
     </div>
   )
@@ -136,21 +146,24 @@ function Msg({ m, wiki, onJump, onWiki }: { m: QaMsg; wiki: Wiki | null; onJump:
       <div className="qa-q">{m.q}</div>
       <div ref={box} className={cls('qa-a', a.status)} onClick={onClick}>
         <div className="qa-a-head">
-          {m.kind && <span className={cls('qa-kind', m.kind === '지식' && 'doc')}>{m.kind === '환자' ? '이 환자' : '지식'}</span>}
-          {a.mode === 'wiki' && <span className="qa-kind gray">위키 검색</span>}
-          {a.mode === 'llm' && <span className="qa-kind doc">위키 근거로 생성</span>}
-          {a.status === 'refused' && <span className="qa-kind warn">결정 질문</span>}
-          {a.status === 'notFound' && <span className="qa-kind gray">근거 없음</span>}
-          {a.status === 'weak' && <span className="qa-kind warn">근거 약함</span>}
+          {m.kind && <span className={cls('qa-kind', m.kind === '지식' && 'doc')}>{m.kind === '환자' ? tr('이 환자', 'This patient') : tr('지식', 'Knowledge')}</span>}
+          {a.mode === 'wiki' && <span className="qa-kind gray">{tr('위키 검색', 'Wiki search')}</span>}
+          {a.mode === 'llm' && <span className="qa-kind doc">{tr('위키 근거로 생성', 'Generated from wiki')}</span>}
+          {a.status === 'refused' && <span className="qa-kind warn">{tr('결정 질문', 'Decision question')}</span>}
+          {a.status === 'notFound' && <span className="qa-kind gray">{tr('근거 없음', 'No evidence')}</span>}
+          {a.status === 'weak' && <span className="qa-kind warn">{tr('근거 약함', 'Weak evidence')}</span>}
           <span className="spacer" />
-          <span className="mono muted">{mdhm(m.clock)} 기준</span>
+          <span className="mono muted">{tr(`${mdhm(m.clock)} 기준`, `as of ${mdhm(m.clock)}`)}</span>
         </div>
         {llmHtml ? llmHtml.map((h, i) => <p key={i} className="md" dangerouslySetInnerHTML={{ __html: h }} />) : a.text.map((t, i) => <p key={i}>{t}</p>)}
         {ck && (
           <div className={cls('qa-check', (ck.unsupported.length > 0 || ck.uncited > 0 || ck.badRefs.length > 0) && 'bad')}>
-            인용 확인: 문장 {ck.sentences}개 중 근거 번호 없음 {ck.uncited}개 · 숫자 {ck.numbers}개 중 근거 조각에 없는 것 {ck.unsupported.length}개
+            {tr(
+              `인용 확인: 문장 ${ck.sentences}개 중 근거 번호 없음 ${ck.uncited}개 · 숫자 ${ck.numbers}개 중 근거 조각에 없는 것 ${ck.unsupported.length}개`,
+              `Citation check: ${ck.uncited} of ${ck.sentences} sentences uncited · ${ck.unsupported.length} of ${ck.numbers} numbers not in the passages`,
+            )}
             {ck.unsupported.length > 0 && <> ({ck.unsupported.join(', ')})</>}
-            {ck.badRefs.length > 0 && <> · 없는 조각 번호 {ck.badRefs.join(', ')}</>}
+            {ck.badRefs.length > 0 && <> · {tr('없는 조각 번호', 'invalid passage numbers')} {ck.badRefs.join(', ')}</>}
             <span className="muted"> · {a.llm!.model}</span>
           </div>
         )}
@@ -163,18 +176,18 @@ function Msg({ m, wiki, onJump, onWiki }: { m: QaMsg; wiki: Wiki | null; onJump:
         )}
         {a.sources.length > 0 && (
           <div className="qa-src">
-            <span className="qa-src-k">출처</span>
+            <span className="qa-src-k">{tr('출처', 'Sources')}</span>
             {a.sources.map(s =>
               s.ref ? (
-                <button key={s.label} className="qa-s case" onClick={() => onJump(s.ref!)} title="원자료에서 보기">
+                <button key={s.label} className="qa-s case" onClick={() => onJump(s.ref!)} title={tr('원자료에서 보기', 'View in the source record')}>
                   {s.label} <span className="ev-go">›</span>
                 </button>
               ) : s.wiki ? (
-                <button key={s.label} className="qa-s doc link-s" onClick={() => onWiki({ page: s.wiki! })} title="근거 위키에서 보기">
-                  {s.kind === 'doc' && !s.label.startsWith('근거 위키') ? '원문 · ' : ''}{s.label} <span className="ev-go">›</span>
+                <button key={s.label} className="qa-s doc link-s" onClick={() => onWiki({ page: s.wiki! })} title={tr('근거 위키에서 보기', 'View in the evidence wiki')}>
+                  {s.kind === 'doc' && !s.label.startsWith('근거 위키') && !s.label.startsWith('Evidence wiki') ? tr('원문 · ', 'Source · ') : ''}{s.label} <span className="ev-go">›</span>
                 </button>
               ) : (
-                <span key={s.label} className={cls('qa-s', s.kind)}>{s.kind === 'doc' ? '문서 · ' : ''}{s.label}</span>
+                <span key={s.label} className={cls('qa-s', s.kind)}>{s.kind === 'doc' ? tr('문서 · ', 'Doc · ') : ''}{s.label}</span>
               ),
             )}
           </div>
@@ -192,13 +205,13 @@ function Hit({ n, h, wiki, cited, onWiki }: { n: number; h: QaHit; wiki: Wiki; c
   const long = h.text.length > 360
   return (
     <div className={cls('qa-hit', !cited && 'dim')} data-n={n}>
-      <button className="qa-hit-head" onClick={() => onWiki({ page: h.page, heading: sec })} title="근거 위키에서 이 절 보기">
+      <button className="qa-hit-head" onClick={() => onWiki({ page: h.page, heading: sec })} title={tr('근거 위키에서 이 절 보기', 'View this section in the evidence wiki')}>
         <span className="qa-hit-n">{n}</span>
         <span className="qa-hit-path">{h.title}{sec && <> › {sec}</>}</span>
-        <span className="ev-go">위키 ›</span>
+        <span className="ev-go">{tr('위키 ›', 'Wiki ›')}</span>
       </button>
       <div className={cls('qa-hit-body md', long && !open && 'clamp')} dangerouslySetInnerHTML={{ __html: html }} />
-      {long && <button className="link qa-more" onClick={() => setOpen(o => !o)}>{open ? '접기' : '더 보기'}</button>}
+      {long && <button className="link qa-more" onClick={() => setOpen(o => !o)}>{open ? tr('접기', 'Show less') : tr('더 보기', 'Show more')}</button>}
     </div>
   )
 }

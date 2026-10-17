@@ -3,14 +3,18 @@
 // 공개 시각 = max(채혈 시각, 보고 시각), ULN = 그 행의 기록 상한, ICU 입실 전 2배 이상인 환자는 제외.
 import type { CaseData, EndState, LabItem, LabResult, LiverEvent, MarOrder } from '../types'
 import { addHours, ceilHour, hoursBetween, isAfter, toMs } from './time'
+import { tr } from './i18n'
 
 /** 사건 항목 (ALT, ALP, 총빌리 중 하나, OR) */
 export const EVENT_CODES = ['ALT', 'ALP', 'TB']
-/** 첫 이상: 2 x ULN. 종료 상태 (에이전트 2) 와 원인 추정 (에이전트 3) 이 이때 한 번 돈다 */
+/** 첫 이상: 2 x ULN. 정상 구간이 끝나 발생 예측 (에이전트 1) 이 멈추는 시점 */
 export const K_FIRST = 2
-/** 발생 예측 (에이전트 1) 의 목표: 24시간 안 5 x ULN */
+/**
+ * 5배 사건: 발생 예측 (에이전트 1) 의 목표 (24시간 안 5 x ULN) 이자, 종료 상태 (에이전트 2) 와 원인 추정 (에이전트 3) 이 한 번 도는 시점.
+ * 10/17 결정 (모델 패키지는 첫 이상 시점. 예후 모델은 첫 이상 시점 자료로 학습했으므로 5배 시점 적용은 학습 범위 밖)
+ */
 export const K_TARGET = 5
-/** 회복: ICU 퇴실 때 마지막 ALT, ALP, 총빌리가 모두 2 x ULN 미만 */
+/** 회복: ICU 퇴실 때 마지막 ALT, ALP, 총빌리가 모두 2 x ULN 미만 (5배 사건 뒤 세 항목을 모두 다시 재야 판정) */
 export const K_RECOVER = 2
 /** 정상 구간: 세 항목을 모두 최근 24시간 안에 쟀고 모두 2 x ULN 미만 */
 export const NORMAL_WINDOW_H = 24
@@ -19,11 +23,12 @@ export const A1_THRESHOLD = 0.3
 /** 원인 규칙 점수가 이 값 이상이면 그 범주에 해당 (1) */
 export const RULE_THRESHOLD = 1.0
 
+// 이름은 읽을 때마다 지금 언어로 (END_STATES[i].label)
 export const END_STATES: { key: EndState; label: string }[] = [
-  { key: 'rec-alive', label: '회복 · 생존' },
-  { key: 'rec-dead', label: '회복 · 사망' },
-  { key: 'norec-dead', label: '미회복 · 사망' },
-  { key: 'norec-alive', label: '미회복 · 생존' },
+  { key: 'rec-alive', get label() { return tr('회복 · 생존', 'Recovered · alive') } },
+  { key: 'rec-dead', get label() { return tr('회복 · 사망', 'Recovered · died') } },
+  { key: 'norec-dead', get label() { return tr('미회복 · 사망', 'Not recovered · died') } },
+  { key: 'norec-alive', get label() { return tr('미회복 · 생존', 'Not recovered · alive') } },
 ]
 
 const byChart = (a: LabResult, b: LabResult) => toMs(a.charttime) - toMs(b.charttime)
@@ -75,6 +80,15 @@ export function firstEvent(cs: CaseData, k: number): LiverEvent | undefined {
   return { k, result: r, item, t0, drawn: r.charttime, detectAt: ceilHour(t0), group, prev }
 }
 
+/** 사건 묶음 (LiverEvent['group'], 값은 한국어 그대로) 의 화면 이름 */
+export function groupLabel(g: LiverEvent['group']): string {
+  return g === '입실 초기 이상'
+    ? tr(g, 'Abnormal early after ICU admission')
+    : g === '관찰 중 신규 이상'
+      ? tr(g, 'New abnormality during monitoring')
+      : tr(g, 'Onset time unknown')
+}
+
 /** 기준 시각에 공개된 항목별 마지막 값 */
 export const lastAt = (cs: CaseData, code: string, t: string) => seriesAt(cs, code, t).at(-1)
 
@@ -92,8 +106,10 @@ export function normalAt(cs: CaseData, t: string): { ok: boolean; why?: string }
     else if (r.value >= K_FIRST * uln(cs, code)) high.push(code)
   }
   const name = (c: string) => itemOf(cs, c).name.split(' (')[0]
-  if (high.length) return { ok: false, why: `${high.map(name).join(', ')} 2배 이상` }
-  if (stale.length) return { ok: false, why: `최근 24시간 안 ${stale.map(name).join(', ')} 측정 없음` }
+  if (high.length) return { ok: false, why: tr(`${high.map(name).join(', ')} 2배 이상`, `${high.map(name).join(', ')} ≥ 2× ULN`) }
+  if (stale.length) {
+    return { ok: false, why: tr(`최근 24시간 안 ${stale.map(name).join(', ')} 측정 없음`, `${stale.map(name).join(', ')} not measured in the last 24 h`) }
+  }
   return { ok: true }
 }
 
@@ -121,7 +137,7 @@ export const sameDraw = (cs: CaseData, ev: LiverEvent, code: string) =>
   cs.labs.find(r => r.code === code && r.charttime === ev.drawn)
 
 export function patternOf(r: number) {
-  return r >= 5 ? '간세포형' : r <= 2 ? '담즙정체형' : '혼합형'
+  return r >= 5 ? tr('간세포형', 'Hepatocellular') : r <= 2 ? tr('담즙정체형', 'Cholestatic') : tr('혼합형', 'Mixed')
 }
 
 /** R 비 = (ALT/ALT ULN) ÷ (ALP/ALP ULN), 같은 채혈 기준 */

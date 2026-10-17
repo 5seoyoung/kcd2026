@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react'
+import { tr } from '../lib/i18n'
 
 interface Props {
   title: string
@@ -19,7 +20,7 @@ export function Modal({ title, onClose, children, wide }: Props) {
         <div className="panel-head">
           {title}
           <span className="spacer" />
-          <button className="btn x" onClick={onClose} aria-label="닫기">✕</button>
+          <button className="btn x" onClick={onClose} aria-label={tr('닫기', 'Close')}>✕</button>
         </div>
         <div className="modal-body">{children}</div>
       </div>

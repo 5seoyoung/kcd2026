@@ -4,6 +4,8 @@ import type { Sim } from '../data'
 import { daysBetween, fromMs, hoursBetween, isAfter, md, mdhm, toMs } from '../lib/time'
 import { fmtNum } from '../lib/lab'
 import { cls, textWidth, useWidth } from '../lib/ui'
+import { bi, pick, tr, type Bi } from '../lib/i18n'
+import { tx } from '../data/cases/en'
 
 type Lane = 'ai' | TimelineEvent['lane']
 
@@ -17,11 +19,11 @@ interface Item {
   agent?: AgentId
 }
 
-const LANES: { key: Lane; label: string }[] = [
-  { key: 'ai', label: 'AI 에이전트' },
-  { key: 'hemo', label: '혈역학' },
-  { key: 'drug', label: '약물' },
-  { key: 'test', label: '검사·처치' },
+const LANES: { key: Lane; label: Bi }[] = [
+  { key: 'ai', label: bi('AI 에이전트', 'AI agents') },
+  { key: 'hemo', label: bi('혈역학', 'Hemodynamics') },
+  { key: 'drug', label: bi('약물', 'Drugs') },
+  { key: 'test', label: bi('검사·처치', 'Tests/procs') },
 ]
 
 const ROW_H = 15
@@ -69,14 +71,14 @@ export function Timeline({ cs, sim, clock, onSeek, onJump, onAgent }: Props) {
   const known = (t?: string) => !!t && !isAfter(t, clock)
 
   // 사건과 에이전트 실행은 기준 시각에 알게 된 것만
-  const items: Item[] = cs.events.filter(e => known(e.start)).map(e => ({ ...e }))
+  const items: Item[] = cs.events.filter(e => known(e.start)).map(e => ({ ...e, label: tx(e.label) }))
   // 첫 이상과 5배 사건이 같은 결과면 한 표시로
   const same = sim.first && sim.target && sim.first.result.id === sim.target.result.id
   for (const ev of same ? [sim.target] : [sim.first, sim.target]) {
     if (!ev || !known(ev.detectAt)) continue
     items.push({
       id: `ev${ev.k}`, lane: 'test', start: ev.t0,
-      label: `${short(ev.item.name)} ${fmtNum(ev.result.value, ev.item.dp)} · ${same ? '2배, 5배' : `${ev.k}배`}`,
+      label: `${short(ev.item.name)} ${fmtNum(ev.result.value, ev.item.dp)} · ${same ? tr('2배, 5배', '2×, 5×') : tr(`${ev.k}배`, `${ev.k}×`)}`,
       ref: { tab: 'lab', row: ev.result.code, col: ev.result.id },
     })
   }
@@ -88,17 +90,17 @@ export function Timeline({ cs, sim, clock, onSeek, onJump, onAgent }: Props) {
     const end = fromMs(Math.min(toMs(p.time) + HOUR, now))
     if (p.p >= thr) {
       if (alarm) alarm.end = end
-      else alarm = { id: `a1-${p.time}`, lane: 'ai', label: '발생 예측 경보', start: p.time, end, agent: 1 }
+      else alarm = { id: `a1-${p.time}`, lane: 'ai', label: tr('발생 예측 경보', 'Early-warning alarm'), start: p.time, end, agent: 1 }
     } else if (alarm) {
       items.push(alarm)
       alarm = undefined
     }
   }
   if (alarm) items.push(alarm)
-  // 첫 이상 때 종료 상태 예측과 원인 추정이 함께 돈다
-  if (sim.first && known(sim.first.detectAt)) {
-    items.push({ id: 'a3', lane: 'ai', label: '원인 추정', start: sim.first.detectAt, agent: 3 })
-    items.push({ id: 'a2', lane: 'ai', label: '종료 상태 예측', start: sim.first.detectAt, agent: 2 })
+  // 5배 사건 때 종료 상태 예측과 원인 추정이 함께 돈다
+  if (sim.target && known(sim.target.detectAt)) {
+    items.push({ id: 'a3', lane: 'ai', label: tr('원인 추정', 'Cause assessment'), start: sim.target.detectAt, agent: 3 })
+    items.push({ id: 'a2', lane: 'ai', label: tr('종료 상태 예측', 'End-state prediction'), start: sim.target.detectAt, agent: 2 })
   }
   items.sort((a, b) => toMs(a.start) - toMs(b.start))
 
@@ -109,7 +111,7 @@ export function Timeline({ cs, sim, clock, onSeek, onJump, onAgent }: Props) {
   const lanes = LANES.map(l => {
     const st = stack(items.filter(e => e.lane === l.key), endOf)
     const rows = Math.max(1, ...st.map(i => i.row + 1))
-    const lane = { ...l, y, rows, items: st }
+    const lane = { ...l, label: pick(l.label), y, rows, items: st }
     y += rows * ROW_H + 4
     return lane
   })
@@ -150,16 +152,23 @@ export function Timeline({ cs, sim, clock, onSeek, onJump, onAgent }: Props) {
   return (
     <div className="timeline">
       <div className="tl-head">
-        <strong>경과 시간선</strong>
+        <strong>{tr('경과 시간선', 'Course timeline')}</strong>
         <span className="muted">
-          ICU 입실 {mdhm(cs.icuIn)} · 기준 시각까지 {hoursBetween(cs.icuIn, clock).toFixed(1)}시간
-          {!isAfter(cs.icuOut, clock) && ` · ICU 퇴실 ${mdhm(cs.icuOut)}`}
+          {tr(
+            `ICU 입실 ${mdhm(cs.icuIn)} · 기준 시각까지 ${hoursBetween(cs.icuIn, clock).toFixed(1)}시간`,
+            `ICU admission ${mdhm(cs.icuIn)} · ${hoursBetween(cs.icuIn, clock).toFixed(1)} h to the as-of time`,
+          )}
+          {!isAfter(cs.icuOut, clock) && tr(` · ICU 퇴실 ${mdhm(cs.icuOut)}`, ` · ICU discharge ${mdhm(cs.icuOut)}`)}
         </span>
         <span className="spacer" />
-        <span className="muted tl-hint">{hover && hover !== clock ? `${mdhm(hover)} 로 옮기기` : '빈 곳을 누르거나 끌면 기준 시각이 바뀝니다'}</span>
+        <span className="muted tl-hint">
+          {hover && hover !== clock
+            ? tr(`${mdhm(hover)} 로 옮기기`, `Move to ${mdhm(hover)}`)
+            : tr('빈 곳을 누르거나 끌면 기준 시각이 바뀝니다', 'Click or drag an empty spot to change the as-of time')}
+        </span>
       </div>
       <div ref={ref} className="tl-plot">
-        <svg width={W} height={H} tabIndex={0} onKeyDown={onKey} role="slider" aria-label="기준 시각" aria-valuetext={clock}
+        <svg width={W} height={H} tabIndex={0} onKeyDown={onKey} role="slider" aria-label={tr('기준 시각', 'As-of time')} aria-valuetext={clock}
           aria-valuemin={0} aria-valuemax={sim.ticks.length - 1} aria-valuenow={sim.ticks.indexOf(clock)}>
           <defs>
             <pattern id="tl-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -217,7 +226,7 @@ export function Timeline({ cs, sim, clock, onSeek, onJump, onAgent }: Props) {
           ))}
           {marks.map(ev => (
             <g key={ev!.k} className="tl-evmark">
-              <title>{`${ev!.k}배 사건 · 공개 ${mdhm(ev!.t0)} (채혈 ${mdhm(ev!.drawn)})`}</title>
+              <title>{tr(`${ev!.k}배 사건 · 공개 ${mdhm(ev!.t0)} (채혈 ${mdhm(ev!.drawn)})`, `${ev!.k}× event · released ${mdhm(ev!.t0)} (drawn ${mdhm(ev!.drawn)})`)}</title>
               <line x1={sx(ev!.t0)} x2={sx(ev!.t0)} y1={TOP - 2} y2={axisY} />
             </g>
           ))}

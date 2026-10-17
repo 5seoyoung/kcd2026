@@ -7,6 +7,7 @@ import { fmtNum } from '../../lib/lab'
 import { addHours, daysBetween, floorHour, isAfter, md, mdhm, toMs } from '../../lib/time'
 import { useWidth } from '../../lib/ui'
 import { a4Now, crossing } from './state'
+import { tr } from '../../lib/i18n'
 
 interface Props {
   cs: CaseData
@@ -21,32 +22,38 @@ const TRAJ = ['ALT', 'AST', 'ALP', 'TB']
 
 export function Agent4({ cs, sim, clock, events }: Props) {
   const { at, ended, forecasts } = a4Now(cs, sim, clock)
-  if (!at) return <div className="ad-wait">간 검사 결과가 나오면 ICU 퇴실까지 매시간 실행합니다.</div>
-  if (!forecasts.length) return <div className="ad-wait">{mdhm(at)}: 최근 24시간 안에 잰 간 검사가 없어 이번 시각은 예측하지 않습니다.</div>
+  if (!at) return <div className="ad-wait">{tr('간 검사 결과가 나오면 ICU 퇴실까지 매시간 실행합니다.', 'Runs hourly from the first liver test result until ICU discharge.')}</div>
+  if (!forecasts.length) {
+    return (
+      <div className="ad-wait">
+        {tr(`${mdhm(at)}: 최근 24시간 안에 잰 간 검사가 없어 이번 시각은 예측하지 않습니다.`, `${mdhm(at)}: no liver test in the last 24 h, so no forecast this hour.`)}
+      </div>
+    )
+  }
   const skipped = TRAJ.filter(c => !forecasts.some(f => f.code === c))
   return (
     <div className="ad">
       <div className="ad-head">
         <span className="ad-what">
-          <b>앞으로 24시간 {forecasts.map(f => short(itemOf(cs, f.code).name)).join(', ')}</b>
+          <b>{tr('앞으로 24시간', 'Next 24 h:')} {forecasts.map(f => short(itemOf(cs, f.code).name)).join(', ')}</b>
           <span className="muted">
-            {mdhm(at)} 실행 · {ended ? 'ICU 퇴실로 멈춤' : '매시간'}
-            {skipped.length > 0 && <> · <span className="warn-ink">{skipped.map(c => short(itemOf(cs, c).name)).join(', ')} 예측 안 함</span></>}
+            {tr(`${mdhm(at)} 실행`, `Run ${mdhm(at)}`)} · {ended ? tr('ICU 퇴실로 멈춤', 'Stopped at ICU discharge') : tr('매시간', 'Hourly')}
+            {skipped.length > 0 && <> · <span className="warn-ink">{skipped.map(c => short(itemOf(cs, c).name)).join(', ')} {tr('예측 안 함', 'not forecast')}</span></>}
           </span>
         </span>
         <span className="spacer" />
         <span className="legend">
-          <span className="lg measured" />측정 <span className="lg forecast" />예측 중앙값 <span className="lg band" />10~90%
+          <span className="lg measured" />{tr('측정', 'Measured')} <span className="lg forecast" />{tr('예측 중앙값', 'Forecast median')} <span className="lg band" />{tr('10~90%', '10–90%')}
         </span>
       </div>
       <TrajChart cs={cs} at={at} forecasts={forecasts} events={events} />
       <table className="mini-grid traj-table">
         <thead>
           <tr>
-            <th>항목</th>
-            <th>마지막 측정</th>
-            {HORIZONS.map(h => <th key={h} className="r">+{h}시간</th>)}
-            <th>24시간 안</th>
+            <th>{tr('항목', 'Test')}</th>
+            <th>{tr('마지막 측정', 'Last measured')}</th>
+            {HORIZONS.map(h => <th key={h} className="r">{tr(`+${h}시간`, `+${h} h`)}</th>)}
+            <th>{tr('24시간 안', 'Within 24 h')}</th>
           </tr>
         </thead>
         <tbody>
@@ -58,11 +65,11 @@ export function Agent4({ cs, sim, clock, events }: Props) {
                 <td><b>{short(it.name)}</b></td>
                 <td>{fmtNum(f.last.value, it.dp)} <span className="mono muted">{mdhm(f.last.time)}</span></td>
                 {f.points.map(p => (
-                  <td key={p.h} className="r" title={`10~90% ${fmtNum(p.lo, it.dp)}~${fmtNum(p.hi, it.dp)}`}>
+                  <td key={p.h} className="r" title={tr(`10~90% ${fmtNum(p.lo, it.dp)}~${fmtNum(p.hi, it.dp)}`, `10–90% ${fmtNum(p.lo, it.dp)}–${fmtNum(p.hi, it.dp)}`)}>
                     {fmtNum(p.v, it.dp)}
                   </td>
                 ))}
-                <td>{k ? <span className="cross">{k}배 넘음</span> : <span className="muted">–</span>}</td>
+                <td>{k ? <span className="cross">{tr(`${k}배 넘음`, `Crosses ${k}×`)}</span> : <span className="muted">–</span>}</td>
               </tr>
             )
           })}
@@ -72,16 +79,23 @@ export function Agent4({ cs, sim, clock, events }: Props) {
             return (
               <tr key={code} className="nofc">
                 <td><b>{short(it.name)}</b></td>
-                <td>{last ? <>{fmtNum(last.value, it.dp)} <span className="mono muted">{mdhm(last.charttime)}</span></> : <span className="muted">없음</span>}</td>
-                <td colSpan={HORIZONS.length + 1} className="warn-ink">최근 24시간 측정 없음 · 예측 안 함</td>
+                <td>{last ? <>{fmtNum(last.value, it.dp)} <span className="mono muted">{mdhm(last.charttime)}</span></> : <span className="muted">{tr('없음', 'None')}</span>}</td>
+                <td colSpan={HORIZONS.length + 1} className="warn-ink">{tr('최근 24시간 측정 없음 · 예측 안 함', 'Not measured in the last 24 h · not forecast')}</td>
               </tr>
             )
           })}
         </tbody>
       </table>
       <p className="note">
-        {sim.run ? 'MIMIC-IV 로 학습한 분위 그래디언트 부스팅. 그 시각 24시간 안에 잰 항목만 예측합니다. ' : ''}실선은 측정값, 점선은 6, 12, 18, 24시간 뒤 예측 중앙값, 띠는 10~90% 범위입니다. 간 검사는 하루 1~2번이라 실제로는 다음 채혈 값을 예측하는 셈입니다. 칸에 마우스를 올리면 범위가 보입니다.
-        10~90% 띠는 MIMIC 개발 자료로 맞춘 범위이고, 이 병원 자료에서 실제로 몇 % 를 담는지 (포함률) 는 아직 확인하지 않았습니다.
+        {sim.run ? tr('MIMIC-IV 로 학습한 분위 그래디언트 부스팅. 그 시각 24시간 안에 잰 항목만 예측합니다. ', 'Quantile gradient boosting trained on MIMIC-IV. Only tests measured within the past 24 h are forecast. ') : ''}
+        {tr(
+          '실선은 측정값, 점선은 6, 12, 18, 24시간 뒤 예측 중앙값, 띠는 10~90% 범위입니다. 간 검사는 하루 1~2번이라 실제로는 다음 채혈 값을 예측하는 셈입니다. 칸에 마우스를 올리면 범위가 보입니다.',
+          'Solid lines are measurements, dashed lines the forecast median at 6, 12, 18 and 24 h, and bands the 10–90% range. Liver tests are drawn once or twice a day, so in practice this forecasts the next draw. Hover over a cell to see the range.',
+        )}{' '}
+        {tr(
+          '띠는 모델의 10~90% 범위를 MIMIC 평가 집단에서 실제 값을 80% 담도록 조금 넓힌 것입니다 (conformal, 원래 70~77% 만 담음). 이 병원 자료에서 몇 % 를 담는지는 아직 확인하지 않았습니다.',
+          "The bands are the model's 10–90% range, widened slightly to contain the actual value 80% of the time in the MIMIC evaluation cohort (conformal; originally only 70–77%). Coverage on this site's data has not been checked yet.",
+        )}
       </p>
     </div>
   )
@@ -154,10 +168,10 @@ function TrajChart({ cs, at, forecasts, events }: ChartProps) {
   const tip = hover
     ? lanes.map(l => {
         const m = l.measured.find(r => floorHour(r.charttime) === hover)
-        if (m) return { l, kind: '측정' as const, text: fmtNum(m.value, l.it.dp) }
+        if (m) return { l, kind: tr('측정', 'Measured'), text: fmtNum(m.value, l.it.dp) }
         const p = l.pts.find(q => q.time === hover)
         return p
-          ? { l, kind: `+${p.h}시간` as string, text: `${fmtNum(p.v, l.it.dp)} (${fmtNum(p.lo, l.it.dp)}~${fmtNum(p.hi, l.it.dp)})` }
+          ? { l, kind: tr(`+${p.h}시간`, `+${p.h} h`), text: `${fmtNum(p.v, l.it.dp)} (${fmtNum(p.lo, l.it.dp)}${tr('~', '–')}${fmtNum(p.hi, l.it.dp)})` }
           : { l, kind: '–' as string, text: '' }
       })
     : null
@@ -166,7 +180,7 @@ function TrajChart({ cs, at, forecasts, events }: ChartProps) {
   return (
     <div className="mchart traj" ref={ref}>
       <svg width={W} height={H} tabIndex={0} onKeyDown={onKey} onBlur={() => setHover(null)} role="img"
-        aria-label="ALT, ALP, 총빌리의 지난 72시간 측정값과 앞으로 24시간 예측. 아래 표에 같은 예측값이 있습니다">
+        aria-label={tr('ALT, ALP, 총빌리의 지난 72시간 측정값과 앞으로 24시간 예측. 아래 표에 같은 예측값이 있습니다', 'Past 72 h measurements and next 24 h forecasts for ALT, ALP and total bilirubin. The table below has the same forecast values')}>
         <defs>
           <clipPath id="traj-clip"><rect x={PAD_L} y={0} width={W - PAD_L - PAD_R} height={H} /></clipPath>
         </defs>
@@ -200,7 +214,7 @@ function TrajChart({ cs, at, forecasts, events }: ChartProps) {
                 return (
                   <g key={k}>
                     <line x1={PAD_L} x2={W - PAD_R} y1={sy(k * l.u)} y2={sy(k * l.u)} className="mc-thr" />
-                    <text x={PAD_L + 3 + (close ? 52 : 0)} y={sy(k * l.u) - 2.5} className="mc-thr-label">{k}배 {fmtNum(k * l.u, l.it.dp)}</text>
+                    <text x={PAD_L + 3 + (close ? 52 : 0)} y={sy(k * l.u) - 2.5} className="mc-thr-label">{k}{tr('배', '×')} {fmtNum(k * l.u, l.it.dp)}</text>
                   </g>
                 )
               })}
@@ -223,7 +237,7 @@ function TrajChart({ cs, at, forecasts, events }: ChartProps) {
           </g>
         ))}
         <line x1={ax} x2={ax} y1={TOP - 6} y2={plotBottom} className="tj-now" />
-        <text x={ax + 4} y={TOP - 1} className="tj-now-label">기준 → 24시간</text>
+        <text x={ax + 4} y={TOP - 1} className="tj-now-label">{tr('기준 → 24시간', 'As-of → 24 h')}</text>
         {hover && <line x1={hx} x2={hx} y1={TOP - 4} y2={plotBottom} className="mc-cross" pointerEvents="none" />}
         <rect x={PAD_L} y={0} width={W - PAD_L - PAD_R} height={H} fill="transparent" onMouseMove={pick} onMouseLeave={() => setHover(null)} />
       </svg>

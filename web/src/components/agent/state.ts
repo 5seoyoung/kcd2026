@@ -1,12 +1,16 @@
 // 기준 시각에서 각 에이전트가 어디까지 왔는지 계산한다. 카드, 상세 화면, 상태 줄이 같이 쓴다.
-import type { A1Point, A4Forecast, CaseData, LiverEvent } from '../../types'
+import type { A1Point, A4Forecast, CaseData, Confidence, LiverEvent } from '../../types'
 import type { Sim } from '../../data'
 import { isKnown, uln } from '../../lib/events'
 import { addHours, hoursBetween, isAfter } from '../../lib/time'
+import { tr } from '../../lib/i18n'
 
 export type RunState = { phase: 'idle' | 'running' | 'done'; step: number }
 
 export { pct } from '../../lib/ui'
+
+/** 확신 표시 ('확신 낮음'). level 값은 한국어 그대로 두고 화면에서만 바꿈 */
+export const confLabel = (level: Confidence['level']) => tr(`확신 ${level}`, level === '낮음' ? 'Confidence low' : 'Confidence high')
 
 /** 에이전트 1: 기준 시각의 마지막 출력, 이번 시각이 판정 불가인지, 멈췄는지 */
 export function a1Now(sim: Sim, clock: string): { point?: A1Point; unknown?: string; started: boolean; ended: boolean } {
@@ -53,4 +57,5 @@ export function crossing(cs: CaseData, f: A4Forecast): number | null {
   return null
 }
 
-export const firstKnown = (sim: Sim, clock: string) => isKnown(sim.first, clock)
+/** 종료 상태와 원인 추정이 도는 5배 사건을 기준 시각에 알고 있는지 */
+export const targetKnown = (sim: Sim, clock: string) => isKnown(sim.target, clock)

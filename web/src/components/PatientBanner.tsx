@@ -1,5 +1,7 @@
 import type { CaseData, Patient } from '../types'
 import { dayIndex, isAfter, mdhm } from '../lib/time'
+import { tr } from '../lib/i18n'
+import { tx } from '../data/cases/en'
 
 export function PatientBanner({ p, cs, clock }: { p: Patient; cs?: CaseData; clock: string }) {
   const field = (label: string, value: string) => (
@@ -15,21 +17,21 @@ export function PatientBanner({ p, cs, clock }: { p: Patient; cs?: CaseData; clo
   return (
     <div className="banner">
       <div className="b-name">
-        <strong>{p.name}</strong>
-        <span>{p.sex === 'M' ? '남' : '여'} / {p.age}세</span>
+        <strong>{tx(p.name)}</strong>
+        <span>{p.sex === 'M' ? tr('남', 'M') : tr('여', 'F')} / {tr(`${p.age}세`, `${p.age} y`)}</span>
       </div>
-      {field('등록번호', `9000${p.id.slice(1).padStart(4, '0')}`)}
-      {field('병상', p.bed)}
-      {field('진료과', p.dept)}
-      {field('진단', p.dx)}
-      {cs && field('ICU 입실', `${mdhm(cs.icuIn)} (D+${dayIndex(cs.icuIn, out ? cs.icuOut : clock)})`)}
-      {cs?.history?.length ? field('과거력', cs.history.flatMap(h => h.codes.map(c => `${c.name} (${c.code})`)).join(', ')) : null}
-      {out && field(dead ? 'ICU 사망' : 'ICU 퇴실', dead ? mdhm(cs!.icuOut) : `${mdhm(cs!.icuOut)} · ${cs!.outcome.dischargeTo}`)}
-      {cs && field('키 / 몸무게', `${cs.height} cm / ${cs.weight} kg`)}
+      {field(tr('등록번호', 'MRN'), `9000${p.id.slice(1).padStart(4, '0')}`)}
+      {field(tr('병상', 'Bed'), p.bed)}
+      {field(tr('진료과', 'Department'), tx(p.dept))}
+      {field(tr('진단', 'Diagnosis'), tx(p.dx))}
+      {cs && field(tr('ICU 입실', 'ICU admission'), `${mdhm(cs.icuIn)} (D+${dayIndex(cs.icuIn, out ? cs.icuOut : clock)})`)}
+      {cs?.history?.length ? field(tr('과거력', 'History'), cs.history.flatMap(h => h.codes.map(c => `${tx(c.name)} (${c.code})`)).join(', ')) : null}
+      {out && field(dead ? tr('ICU 사망', 'ICU death') : tr('ICU 퇴실', 'ICU discharge'), dead ? mdhm(cs!.icuOut) : `${mdhm(cs!.icuOut)} · ${tx(cs!.outcome.dischargeTo)}`)}
+      {cs && field(tr('키 / 몸무게', 'Height / weight'), `${cs.height} cm / ${cs.weight} kg`)}
       <div className="b-badges">
-        {out && <span className="badge gray">{dead ? '사망' : '퇴실'}</span>}
+        {out && <span className="badge gray">{dead ? tr('사망', 'Died') : tr('퇴실', 'Discharged')}</span>}
         {!out && badges.map(b => (
-          <span key={b.label} className={`badge ${b.tone}`}>{b.label}</span>
+          <span key={b.label} className={`badge ${b.tone}`}>{tx(b.label)}</span>
         ))}
       </div>
     </div>

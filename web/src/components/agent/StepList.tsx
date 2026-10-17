@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { AgentStep } from '../../types'
 import { cls } from '../../lib/ui'
+import { tr } from '../../lib/i18n'
 
 interface Props {
   steps: AgentStep[]
@@ -18,19 +19,21 @@ export function StepList({ steps, step, running, speed, onSpeed, onSkip }: Props
   return (
     <div className="steps">
       <div className="steps-head">
-        <strong>도구 호출</strong>
-        <span className="muted">{Math.min(step, steps.length)}/{steps.length}단계{!running && ` · ${total.toFixed(1)}초`}</span>
+        <strong>{tr('도구 호출', 'Tool calls')}</strong>
+        <span className="muted">
+          {Math.min(step, steps.length)}/{steps.length}{tr('단계', ' steps')}{!running && tr(` · ${total.toFixed(1)}초`, ` · ${total.toFixed(1)} s`)}
+        </span>
         <span className="spacer" />
         {running ? (
           <>
-            <span className="muted">속도</span>
+            <span className="muted">{tr('속도', 'Speed')}</span>
             {[1, 2, 4].map(s => (
               <button key={s} className={cls('btn mini', speed === s && 'on')} onClick={() => onSpeed(s)}>{s}×</button>
             ))}
-            <button className="btn mini" onClick={onSkip}>건너뛰기</button>
+            <button className="btn mini" onClick={onSkip}>{tr('건너뛰기', 'Skip')}</button>
           </>
         ) : (
-          <button className="link" onClick={() => setOpen(o => !o)}>{open ? '접기' : '단계 펼치기'}</button>
+          <button className="link" onClick={() => setOpen(o => !o)}>{open ? tr('접기', 'Collapse') : tr('단계 펼치기', 'Show steps')}</button>
         )}
       </div>
       {show && (
@@ -39,11 +42,11 @@ export function StepList({ steps, step, running, speed, onSpeed, onSkip }: Props
             const state = i < step ? 'done' : i === step && running ? 'cur' : 'todo'
             return (
               <li key={s.id} className={`st ${state}`}>
-                <span className="st-icon" aria-label={state === 'done' ? '완료' : state === 'cur' ? '실행 중' : '대기'} />
+                <span className="st-icon" aria-label={state === 'done' ? tr('완료', 'done') : state === 'cur' ? tr('실행 중', 'running') : tr('대기', 'waiting')} />
                 <div className="st-body">
                   <div className="st-title">
                     <code>{s.tool}</code> {s.title}
-                    {s.tool === 'query_model1' && <span className="b-only">보조 · 판정에 안 씀</span>}
+                    {s.tool === 'query_model1' && <span className="b-only">{tr('보조 · 판정에 안 씀', 'Supporting · not used in the call')}</span>}
                   </div>
                   {state === 'done' && <div className="st-sum">{s.summary}</div>}
                   {state === 'done' && s.details?.map(d => <div key={d} className="st-detail">{d}</div>)}
